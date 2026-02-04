@@ -3,7 +3,7 @@ SupportPal API Client
 Handles fetching tickets and messages from SupportPal
 """
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 import logging
 
@@ -38,7 +38,9 @@ class SupportPalClient:
             List of ticket dictionaries
         """
         # Calculate UNIX timestamp for N hours ago
-        since_time = datetime.now() - timedelta(hours=hours)
+        # Use UTC timezone-aware datetime to ensure consistent timestamp calculation
+        now_utc = datetime.now(timezone.utc)
+        since_time = now_utc - timedelta(hours=hours)
         created_at_min = int(since_time.timestamp())
         
         logger.info(f"Fetching tickets created since {since_time} (timestamp: {created_at_min})")
