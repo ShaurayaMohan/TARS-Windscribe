@@ -41,8 +41,8 @@ def get_command_handler():
     """Get or create command handler"""
     global _command_handler
     if _command_handler is None:
-        base_url = "https://demerzel.ca3.dev.windscribe.org"  # For GIF URL
-        _command_handler = SlackCommandHandler(signing_secret=None, base_url=base_url)
+        static_url = "https://demerzel.ca3.dev.windscribe.org"  # For GIF URL
+        _command_handler = SlackCommandHandler(signing_secret="", static_url=static_url)
     return _command_handler
 
 
