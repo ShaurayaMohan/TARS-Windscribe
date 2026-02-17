@@ -68,8 +68,22 @@ def handle_tars_command(ack, command, respond):
         
         # Handle help command
         if cmd == "help":
-            response = handler.format_help_response()
-            respond(response)
+            logger.info("Sending help response...")
+            try:
+                # Simplified help without GIF
+                response = {
+                    "text": "🦇 *TARS - Your Robin to the Support Team's Batman*\n\n"
+                            "📚 *Commands:*\n"
+                            "• `/tars analyze` - Analyzes tickets from last 24 hours\n"
+                            "• `/tars analyze [hours]` - Custom time range (e.g., `/tars analyze 6`)\n"
+                            "• `/tars analyze [days]d` - Custom time range in days (e.g., `/tars analyze 7d`)\n"
+                            "• `/tars help` - Shows this message\n\n"
+                            "⚡ Analysis takes 30-60 seconds | 🤖 Powered by OpenAI GPT-4o"
+                }
+                respond(response)
+                logger.info("Help response sent successfully")
+            except Exception as e:
+                logger.error(f"Error sending help response: {e}", exc_info=True)
             return
         
         # Handle errors
