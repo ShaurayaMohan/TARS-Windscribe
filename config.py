@@ -21,7 +21,9 @@ class Config:
     
     # Slack Configuration
     SLACK_WEBHOOK_URL = os.getenv('SLACK_WEBHOOK_URL')
-    SLACK_SIGNING_SECRET = os.getenv('SLACK_SIGNING_SECRET')
+    SLACK_SIGNING_SECRET = os.getenv('SLACK_SIGNING_SECRET')  # Optional - only for webhook mode
+    SLACK_BOT_TOKEN = os.getenv('SLACK_BOT_TOKEN')  # For Socket Mode
+    SLACK_APP_TOKEN = os.getenv('SLACK_APP_TOKEN')  # Socket Mode app-level token
     
     # Schedule Configuration (optional)
     SCHEDULE_CRON = os.getenv('SCHEDULE_CRON', '0 9 * * *')  # Default: Daily at 9 AM
