@@ -8,6 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 from pipeline.analyzer import TARSPipeline
+from storage.mongodb_client import MongoDBStorage
 
 # Load environment variables
 load_dotenv()
@@ -22,15 +23,29 @@ class TARSScheduler:
         """Initialize the scheduler"""
         self.scheduler = BackgroundScheduler()
         self.pipeline = None
+        self.mongodb_storage = None
+        
+    def init_storage(self):
+        """Initialize MongoDB storage"""
+        if self.mongodb_storage is None:
+            mongodb_uri = os.getenv('MONGODB_URI')
+            if mongodb_uri:
+                try:
+                    self.mongodb_storage = MongoDBStorage(mongodb_uri)
+                    logger.info("MongoDB storage initialized for scheduler")
+                except Exception as e:
+                    logger.warning(f"MongoDB not available: {e}")
         
     def init_pipeline(self):
         """Initialize TARS pipeline"""
         if self.pipeline is None:
+            self.init_storage()
             self.pipeline = TARSPipeline(
                 supportpal_api_key=os.getenv('SUPPORTPAL_API_KEY'),
                 supportpal_api_url=os.getenv('SUPPORTPAL_API_URL'),
                 openai_api_key=os.getenv('OPENAI_API_KEY'),
-                slack_webhook_url=os.getenv('SLACK_WEBHOOK_URL')
+                slack_webhook_url=os.getenv('SLACK_WEBHOOK_URL'),
+                mongodb_storage=self.mongodb_storage
             )
     
     def run_scheduled_analysis(self):

@@ -9,6 +9,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from dotenv import load_dotenv
 from pipeline.analyzer import TARSPipeline
 from utils.slack_commands import SlackCommandHandler
+from storage.mongodb_client import MongoDBStorage
 
 load_dotenv()
 
@@ -24,16 +25,32 @@ app = App(token=os.getenv('SLACK_BOT_TOKEN'))
 # Initialize TARS pipeline (lazy loading)
 _pipeline = None
 _command_handler = None
+_mongodb_storage = None
+
+def get_mongodb_storage():
+    """Get or create MongoDB storage instance"""
+    global _mongodb_storage
+    if _mongodb_storage is None:
+        mongodb_uri = os.getenv('MONGODB_URI')
+        if mongodb_uri:
+            try:
+                _mongodb_storage = MongoDBStorage(mongodb_uri)
+                logger.info("MongoDB storage initialized")
+            except Exception as e:
+                logger.warning(f"MongoDB not available: {e}")
+    return _mongodb_storage
 
 def get_pipeline():
     """Get or create TARS pipeline instance"""
     global _pipeline
     if _pipeline is None:
+        storage = get_mongodb_storage()
         _pipeline = TARSPipeline(
             supportpal_api_key=os.getenv('SUPPORTPAL_API_KEY'),
             supportpal_api_url=os.getenv('SUPPORTPAL_API_URL'),
             openai_api_key=os.getenv('OPENAI_API_KEY'),
-            slack_webhook_url=os.getenv('SLACK_WEBHOOK_URL')
+            slack_webhook_url=os.getenv('SLACK_WEBHOOK_URL'),
+            mongodb_storage=storage
         )
     return _pipeline
 

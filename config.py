@@ -25,6 +25,9 @@ class Config:
     SLACK_BOT_TOKEN = os.getenv('SLACK_BOT_TOKEN')  # For Socket Mode
     SLACK_APP_TOKEN = os.getenv('SLACK_APP_TOKEN')  # Socket Mode app-level token
     
+    # MongoDB Configuration
+    MONGODB_URI = os.getenv('MONGODB_URI')  # Optional - for historical data storage
+    
     # Schedule Configuration (optional)
     SCHEDULE_CRON = os.getenv('SCHEDULE_CRON', '0 9 * * *')  # Default: Daily at 9 AM
     

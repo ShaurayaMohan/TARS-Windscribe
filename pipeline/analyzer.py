@@ -1,6 +1,6 @@
 """
 Main analysis pipeline orchestrator
-Coordinates the full TARS workflow: fetch → analyze → format → post
+Coordinates the full TARS workflow: fetch → analyze → format → post → store
 """
 import logging
 import requests
@@ -22,7 +22,8 @@ class TARSPipeline:
         supportpal_api_key: str,
         supportpal_api_url: str,
         openai_api_key: str,
-        slack_webhook_url: str
+        slack_webhook_url: str,
+        mongodb_storage=None
     ):
         """
         Initialize TARS pipeline
@@ -32,6 +33,7 @@ class TARSPipeline:
             supportpal_api_url: SupportPal API base URL
             openai_api_key: OpenAI API key
             slack_webhook_url: Slack webhook URL for posting
+            mongodb_storage: Optional MongoDBStorage instance for saving analyses
         """
         self.supportpal_client = SupportPalClient(supportpal_api_url, supportpal_api_key)
         self.ai_analyzer = AIAnalyzer(openai_api_key)
@@ -41,6 +43,7 @@ class TARSPipeline:
         self.slack_formatter = SlackFormatter(base_url)
         
         self.slack_webhook_url = slack_webhook_url
+        self.mongodb_storage = mongodb_storage
         
     def run_analysis(self, hours: int = 24) -> bool:
         """
@@ -83,15 +86,25 @@ class TARSPipeline:
             slack_message = self.slack_formatter.format_analysis(analysis)
             
             # Step 4: Post to Slack
-            logger.info("Step 4/4: Posting to Slack...")
+            logger.info("Step 4/5: Posting to Slack...")
             success = self._post_to_slack(slack_message)
             
-            if success:
-                logger.info("✅ TARS analysis pipeline completed successfully")
-                return True
-            else:
+            if not success:
                 logger.error("Failed to post to Slack")
                 return False
+            
+            # Step 5: Save to MongoDB (if configured)
+            if self.mongodb_storage:
+                try:
+                    logger.info("Step 5/5: Saving analysis to MongoDB...")
+                    self.mongodb_storage.save_analysis(analysis)
+                    logger.info("✅ Analysis saved to database")
+                except Exception as e:
+                    logger.error(f"Failed to save to MongoDB: {e}")
+                    # Don't fail the entire pipeline if storage fails
+            
+            logger.info("✅ TARS analysis pipeline completed successfully")
+            return True
                 
         except Exception as e:
             logger.error(f"Pipeline error: {e}", exc_info=True)
