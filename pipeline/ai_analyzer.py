@@ -254,7 +254,13 @@ class AIAnalyzer:
                 )
 
         # ── Build the known-categories section ─────────────────────────────────
+        # Compact format: just id and title, one line each — saves input tokens
         categories_block = "\n".join(
+            f'  "{c["category_id"]}": "{c["title"]}"'
+            for c in KNOWN_CATEGORIES
+        )
+        # Full descriptions for context (separate block)
+        categories_detail = "\n".join(
             f'{i}. category_id="{c["category_id"]}"\n'
             f'   title="{c["title"]}"\n'
             f'   description: {c["description"]}'
@@ -265,82 +271,56 @@ class AIAnalyzer:
 
 === YOUR TASK ===
 
-You will receive {ticket_count} support tickets. For each ticket you must:
+You will receive {ticket_count} support tickets. You must:
 
-PHASE 1 — KNOWN CATEGORIES
-Classify the ticket into exactly one of the {len(KNOWN_CATEGORIES)} known categories below.
-These categories represent the normal daily mix. Use the category that best matches the ROOT CAUSE,
-not just surface wording. Every ticket must be assigned to a known category unless Phase 2 applies.
+1. Assign EVERY ticket to exactly one known category (see list below).
+2. If a ticket genuinely does not fit any known category, assign it to a new trend instead.
+3. Write a 1-2 sentence summary for each category that has tickets.
 
-PHASE 2 — NEW / EMERGING TRENDS
-If a ticket genuinely does not fit ANY of the known categories, place it in a new trend cluster.
-A new trend must meet ALL of these criteria:
-  - It describes a SPECIFIC, CONCRETE technical issue or pattern (e.g. "iOS 19.2 crash on launch",
-    "Turkey ISP blocking WireGuard handshake on port 443")
-  - Multiple tickets report the SAME specific problem (at least 2 tickets with a shared root cause)
-  - It is NOT just a ticket that is hard to classify — force-fit ambiguous tickets into the closest
-    known category instead
-  - It is NOT a catch-all or miscellaneous bucket
+=== NEW TREND RULES ===
+Only create a new trend if:
+  - At least 2 tickets share the SAME specific, concrete technical issue
+  - It cannot be reasonably force-fit into any known category
+  - It is NOT a catch-all (no "Miscellaneous", "Other", "General", "Various", "Feedback")
+On a normal day, new_trends will be empty. That is expected.
 
-EXPLICITLY FORBIDDEN in new_trends:
-  - Categories named "Miscellaneous", "Other", "General", "Various", "Feedback", or any synonym
-  - Catch-all buckets for tickets that don't cleanly fit elsewhere
-  - Feature requests, spam, or unrelated vendor emails — assign these to the closest known category
-
-When in doubt, assign to the closest known category. It is perfectly fine (and expected) to have
-ZERO new trends on most days. Only flag something as a new trend when it is genuinely novel.
-
-=== KNOWN CATEGORIES ({len(KNOWN_CATEGORIES)} total) ===
-
-{categories_block}
-
-=== STRICT RULES ===
-
-1. EVERY ticket number must appear in EXACTLY ONE place: either in ONE known_category's
-   ticket_numbers list OR in ONE new_trend's ticket_numbers list.
-   *** CRITICAL: No ticket may be omitted. No ticket may be duplicated. ***
-2. Sum of all volumes across known_categories + new_trends MUST equal EXACTLY {ticket_count}.
-3. Complete ticket list: {all_ticket_numbers}
-   Every single number above MUST appear exactly once in your output arrays.
-4. For known_categories: include ALL {len(KNOWN_CATEGORIES)} category entries,
-   even if a category has 0 tickets (set volume=0 and ticket_numbers=[]).
-5. For new_trends: only include trends with volume >= 2 AND a specific novel issue.
-   An empty new_trends array is the EXPECTED outcome on a normal day.
+=== KNOWN CATEGORIES ===
+{categories_detail}
 
 === OUTPUT FORMAT ===
 
 Return ONLY valid JSON. No markdown, no commentary, no code fences.
 
+The "classifications" object is the most important part. It MUST contain one entry for every
+ticket number. The key is the ticket number as a string, the value is the category_id.
+
 {{
   "analysis_date": "YYYY-MM-DD",
-  "total_tickets_analyzed": {ticket_count},
-  "known_categories": [
-    {{
-      "category_id": "string (must match one of the category_id values above)",
-      "title": "string",
-      "ticket_numbers": [integer ticket numbers — NO DUPLICATES],
-      "volume": integer,
-      "summary": "REQUIRED — 1-2 sentence summary of this batch. Mention specific patterns, protocols, regions, or errors. If volume is 0, write 'No tickets today'."
-    }}
-  ],
+  "classifications": {{
+    "TICKET_NUMBER": "category_id",
+    ... one entry for EVERY ticket in the input ...
+  }},
+  "category_summaries": {{
+    "category_id": "1-2 sentence summary. Specific: mention protocols, regions, errors seen.",
+    ... only for categories that have at least 1 ticket ...
+  }},
   "new_trends": [
     {{
-      "title": "Short specific name (e.g. 'iOS 19.2 Crash on Launch', 'Turkey Block Wave')",
-      "ticket_numbers": [integer ticket numbers — NO DUPLICATES],
+      "title": "Short specific name",
+      "ticket_numbers": [integer ticket numbers],
       "volume": integer,
-      "description": "2-3 sentences: what is happening, probable root cause, why it doesn't fit known categories",
+      "description": "2-3 sentences: what is happening, probable root cause",
       "geographic_pattern": "Countries/regions affected, or null"
     }}
   ]
 }}
 
+CRITICAL — classifications must have EXACTLY {ticket_count} entries, one per ticket:
+{all_ticket_numbers}
+
 === TICKETS TO CLASSIFY ({ticket_count} total) ===
 
-{tickets_formatted}
-
-=== FINAL VERIFICATION (do this before outputting) ===
-Count every ticket_number across all known_categories and new_trends arrays.
-The total MUST be exactly {ticket_count}. If it is not, you have missed tickets — go back and fix it."""
+{tickets_formatted}"""
 
         return prompt
 
@@ -352,12 +332,16 @@ The total MUST be exactly {ticket_count}. If it is not, you have missed tickets 
         """
         Run the two-phase analysis and return structured results.
 
+        The AI outputs a flat classifications dict {ticket_number: category_id}.
+        Python then groups tickets into the known_categories structure.
+        This eliminates the AI's tendency to drop tickets when building nested arrays.
+
         Args:
             tickets: Enriched ticket dicts from SupportPalClient.
             template: Optional custom prompt template from MongoDB.
 
         Returns:
-            Parsed analysis dict, or None on failure.
+            Parsed analysis dict with known_categories / new_trends, or None on failure.
         """
         if not tickets:
             logger.warning("No tickets provided for analysis")
@@ -366,6 +350,11 @@ The total MUST be exactly {ticket_count}. If it is not, you have missed tickets 
         logger.info(f"Starting AI analysis of {len(tickets)} tickets")
         if template:
             logger.info("Using custom prompt template from MongoDB")
+
+        # Build a lookup of valid category IDs for validation
+        valid_category_ids = {c["category_id"] for c in KNOWN_CATEGORIES}
+        # Fallback category for any ticket with an unrecognised / missing classification
+        FALLBACK_CATEGORY = "plan_feature_confusion"
 
         result_text = ""
         try:
@@ -386,65 +375,122 @@ The total MUST be exactly {ticket_count}. If it is not, you have missed tickets 
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.2,
-                max_tokens=16384,
+                max_tokens=8192,
                 frequency_penalty=0.05,
                 response_format={"type": "json_object"},
             )
 
+            # ── Log token usage and finish reason ─────────────────────────
+            finish_reason = response.choices[0].finish_reason
+            usage = response.usage
+            logger.info(
+                f"OpenAI response: finish_reason={finish_reason}, "
+                f"input_tokens={usage.prompt_tokens}, "
+                f"output_tokens={usage.completion_tokens}, "
+                f"total_tokens={usage.total_tokens}"
+            )
+            if finish_reason == "length":
+                logger.warning(
+                    "Response was CUT OFF by max_tokens limit — increase max_tokens!"
+                )
+
             result_text = response.choices[0].message.content
-            analysis = json.loads(result_text)
+            raw = json.loads(result_text)
 
-            # ── Deduplicate ticket_numbers (AI sometimes repeats them) ─────
-            for cat in analysis.get("known_categories", []):
-                if "ticket_numbers" in cat:
-                    cat["ticket_numbers"] = list(dict.fromkeys(cat["ticket_numbers"]))
-                    cat["volume"] = len(cat["ticket_numbers"])
-            for trend in analysis.get("new_trends", []):
-                if "ticket_numbers" in trend:
-                    trend["ticket_numbers"] = list(dict.fromkeys(trend["ticket_numbers"]))
-                    trend["volume"] = len(trend["ticket_numbers"])
+            # ── Build known_categories from flat classifications dict ──────
+            classifications: Dict[str, str] = raw.get("classifications", {})
+            category_summaries: Dict[str, str] = raw.get("category_summaries", {})
+            trends_raw: list = raw.get("new_trends", [])
 
-            known = analysis.get("known_categories", [])
-            trends = analysis.get("new_trends", [])
-
-            # ── Validation: check all tickets were assigned ───────────────
-            assigned_numbers = set()
-            for cat in known:
-                for num in cat.get("ticket_numbers", []):
-                    assigned_numbers.add(int(num))
-            for trend in trends:
+            # Collect ticket numbers that go to new trends so we don't double-count
+            trend_ticket_numbers: set = set()
+            for trend in trends_raw:
                 for num in trend.get("ticket_numbers", []):
-                    assigned_numbers.add(int(num))
+                    trend_ticket_numbers.add(str(num))
 
-            input_numbers = set(int(t["number"]) for t in tickets)
-            missing = input_numbers - assigned_numbers
-            total_assigned = sum(c.get("volume", 0) for c in known) + sum(
-                t.get("volume", 0) for t in trends
-            )
+            # Group by category_id
+            category_tickets: Dict[str, List[int]] = {
+                c["category_id"]: [] for c in KNOWN_CATEGORIES
+            }
 
-            logger.info(
-                f"Analysis complete: {len([c for c in known if c.get('volume', 0) > 0])} "
-                f"active known categories, {len(trends)} new trends"
-            )
-            logger.info(
-                f"Ticket assignment: {total_assigned}/{len(tickets)} assigned, "
-                f"{len(missing)} missing"
-            )
+            input_numbers = {str(t["number"]) for t in tickets}
+            classified = set()
+            unrecognised = []
+
+            for num_str, cat_id in classifications.items():
+                if num_str not in input_numbers:
+                    continue  # AI hallucinated a ticket number — ignore
+                if num_str in trend_ticket_numbers:
+                    classified.add(num_str)
+                    continue  # Ticket is in a new trend, handled below
+                if cat_id in valid_category_ids:
+                    category_tickets[cat_id].append(int(num_str))
+                    classified.add(num_str)
+                else:
+                    unrecognised.append(num_str)
+
+            # Force-assign unrecognised category IDs to fallback
+            if unrecognised:
+                logger.warning(
+                    f"{len(unrecognised)} tickets had unrecognised category IDs "
+                    f"→ reassigned to '{FALLBACK_CATEGORY}': {unrecognised[:10]}"
+                )
+                for num_str in unrecognised:
+                    category_tickets[FALLBACK_CATEGORY].append(int(num_str))
+                    classified.add(num_str)
+
+            # Force-assign tickets missing from classifications entirely
+            missing = input_numbers - classified - trend_ticket_numbers
             if missing:
                 logger.warning(
-                    f"Unassigned ticket numbers ({len(missing)}): "
+                    f"{len(missing)} tickets were omitted from AI classifications "
+                    f"→ force-assigned to '{FALLBACK_CATEGORY}': "
                     f"{sorted(list(missing))[:20]}{'...' if len(missing) > 20 else ''}"
                 )
+                for num_str in missing:
+                    category_tickets[FALLBACK_CATEGORY].append(int(num_str))
 
-            for c in known:
-                if c.get("volume", 0) > 0:
-                    logger.info(
-                        f"  [known] {c.get('title')} — {c.get('volume')} tickets"
-                    )
-            for t in trends:
-                logger.info(
-                    f"  [trend] {t.get('title')} — {t.get('volume')} tickets"
-                )
+            # Build the known_categories list in the same format as before
+            known_categories = []
+            for cat in KNOWN_CATEGORIES:
+                cid = cat["category_id"]
+                nums = list(dict.fromkeys(category_tickets[cid]))  # dedupe, preserve order
+                known_categories.append({
+                    "category_id": cid,
+                    "title": cat["title"],
+                    "ticket_numbers": nums,
+                    "volume": len(nums),
+                    "summary": category_summaries.get(cid, None),
+                })
+
+            # Clean up new_trends (deduplicate ticket_numbers within each trend)
+            new_trends = []
+            for trend in trends_raw:
+                nums = list(dict.fromkeys(trend.get("ticket_numbers", [])))
+                new_trends.append({**trend, "ticket_numbers": nums, "volume": len(nums)})
+
+            # Build final analysis object in the same shape the rest of the pipeline expects
+            analysis = {
+                "analysis_date": raw.get("analysis_date", ""),
+                "total_tickets_analyzed": len(tickets),
+                "known_categories": known_categories,
+                "new_trends": new_trends,
+            }
+
+            # ── Summary logging ───────────────────────────────────────────
+            total_assigned = sum(c["volume"] for c in known_categories) + sum(
+                t["volume"] for t in new_trends
+            )
+            active = [c for c in known_categories if c["volume"] > 0]
+            logger.info(
+                f"Analysis complete: {len(active)} active known categories, "
+                f"{len(new_trends)} new trends, "
+                f"{total_assigned}/{len(tickets)} tickets assigned"
+            )
+            for c in active:
+                logger.info(f"  [known] {c['title']} — {c['volume']} tickets")
+            for t in new_trends:
+                logger.info(f"  [trend] {t.get('title')} — {t.get('volume')} tickets")
 
             return analysis
 
