@@ -44,8 +44,10 @@ class TARSScheduler:
                 supportpal_api_key=os.getenv('SUPPORTPAL_API_KEY'),
                 supportpal_api_url=os.getenv('SUPPORTPAL_API_URL'),
                 openai_api_key=os.getenv('OPENAI_API_KEY'),
-                slack_webhook_url=os.getenv('SLACK_WEBHOOK_URL'),
-                mongodb_storage=self.mongodb_storage
+                slack_bot_token=os.getenv('SLACK_BOT_TOKEN'),
+                slack_channel_id=os.getenv('SLACK_CHANNEL_ID'),
+                slack_webhook_url=os.getenv('SLACK_WEBHOOK_URL'),  # legacy fallback
+                mongodb_storage=self.mongodb_storage,
             )
     
     def run_scheduled_analysis(self):

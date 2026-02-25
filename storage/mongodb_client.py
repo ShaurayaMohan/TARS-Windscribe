@@ -30,6 +30,7 @@ class MongoDBStorage:
             
             self.db = self.client[database_name]
             self.analyses_collection = self.db['analyses']
+            self.config_collection = self.db['config']
             
             # Create indexes for better query performance
             self.analyses_collection.create_index([("analysis_date", DESCENDING)])
@@ -182,7 +183,7 @@ class MongoDBStorage:
             # Daily breakdown
             daily_data = {}
             for analysis in analyses:
-                date_key = analysis.get('analysis_date', analysis['created_at'].strftime('%Y-%m-%d'))
+                date_key = analysis['created_at'].strftime('%Y-%m-%d')
                 if date_key not in daily_data:
                     daily_data[date_key] = {
                         'tickets': 0,
@@ -248,11 +249,22 @@ class MongoDBStorage:
             }))
             week_tickets = sum(a.get('total_tickets_analyzed', 0) for a in week_analyses)
             
+            # Extract top cluster info from the latest analysis
+            top_cluster = None
+            if latest:
+                clusters = latest.get('clusters', [])
+                if clusters:
+                    top_cluster = {
+                        'title': clusters[0].get('title'),
+                        'geographic_pattern': clusters[0].get('geographic_pattern'),
+                    }
+
             return {
                 'latest_analysis': {
-                    'date': latest.get('analysis_date') if latest else None,
+                    'date': latest['created_at'].isoformat() if latest and latest.get('created_at') else latest.get('analysis_date') if latest else None,
                     'tickets': latest.get('total_tickets_analyzed', 0) if latest else 0,
-                    'clusters': len(latest.get('clusters', [])) if latest else 0
+                    'clusters': len(latest.get('clusters', [])) if latest else 0,
+                    'top_cluster': top_cluster,
                 } if latest else None,
                 'today_analyses': today_count,
                 'total_analyses': total_analyses,
@@ -263,6 +275,45 @@ class MongoDBStorage:
             logger.error(f"Error getting dashboard stats: {e}")
             return {}
     
+    def get_prompt_template(self) -> Optional[str]:
+        """
+        Get the stored AI prompt template from MongoDB.
+
+        Returns:
+            Template string with {{TICKET_COUNT}}, {{ALL_TICKET_IDS}},
+            {{TICKETS_FORMATTED}} placeholders, or None if not yet saved.
+        """
+        try:
+            doc = self.config_collection.find_one({"key": "prompt_template"})
+            if doc:
+                return doc.get("value")
+            return None
+        except Exception as e:
+            logger.error(f"Error reading prompt template: {e}")
+            return None
+
+    def save_prompt_template(self, text: str) -> bool:
+        """
+        Save (upsert) the AI prompt template to MongoDB.
+
+        Args:
+            text: Prompt template string with named placeholders.
+
+        Returns:
+            True on success, False on failure.
+        """
+        try:
+            self.config_collection.update_one(
+                {"key": "prompt_template"},
+                {"$set": {"key": "prompt_template", "value": text, "updated_at": datetime.utcnow()}},
+                upsert=True,
+            )
+            logger.info("✅ Prompt template saved to MongoDB")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving prompt template: {e}")
+            return False
+
     def close(self):
         """Close MongoDB connection"""
         if self.client:

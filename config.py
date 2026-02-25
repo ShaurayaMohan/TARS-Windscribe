@@ -22,8 +22,9 @@ class Config:
     # Slack Configuration
     SLACK_WEBHOOK_URL = os.getenv('SLACK_WEBHOOK_URL')
     SLACK_SIGNING_SECRET = os.getenv('SLACK_SIGNING_SECRET')  # Optional - only for webhook mode
-    SLACK_BOT_TOKEN = os.getenv('SLACK_BOT_TOKEN')  # For Socket Mode
+    SLACK_BOT_TOKEN = os.getenv('SLACK_BOT_TOKEN')  # For Socket Mode + chat.postMessage
     SLACK_APP_TOKEN = os.getenv('SLACK_APP_TOKEN')  # Socket Mode app-level token
+    SLACK_CHANNEL_ID = os.getenv('SLACK_CHANNEL_ID')  # Channel for TARS daily reports
     
     # MongoDB Configuration
     MONGODB_URI = os.getenv('MONGODB_URI')  # Optional - for historical data storage
@@ -46,8 +47,8 @@ class Config:
             'SUPPORTPAL_API_KEY': cls.SUPPORTPAL_API_KEY,
             'SUPPORTPAL_API_URL': cls.SUPPORTPAL_API_URL,
             'OPENAI_API_KEY': cls.OPENAI_API_KEY,
-            'SLACK_WEBHOOK_URL': cls.SLACK_WEBHOOK_URL,
-            # SLACK_SIGNING_SECRET is optional - only needed for slash commands
+            'SLACK_BOT_TOKEN': cls.SLACK_BOT_TOKEN,
+            'SLACK_CHANNEL_ID': cls.SLACK_CHANNEL_ID,
         }
         
         missing = [key for key, value in required_vars.items() if not value]
@@ -62,7 +63,7 @@ class Config:
         if not cls.SUPPORTPAL_API_URL.startswith(('http://', 'https://')):
             raise ValueError("SUPPORTPAL_API_URL must start with http:// or https://")
         
-        if not cls.SLACK_WEBHOOK_URL.startswith('https://'):
+        if cls.SLACK_WEBHOOK_URL and not cls.SLACK_WEBHOOK_URL.startswith('https://'):
             raise ValueError("SLACK_WEBHOOK_URL must start with https://")
         
         if not cls.OPENAI_API_KEY.startswith('sk-'):
@@ -76,7 +77,8 @@ class Config:
         return {
             'supportpal_url': cls.SUPPORTPAL_API_URL,
             'openai_configured': bool(cls.OPENAI_API_KEY),
-            'slack_configured': bool(cls.SLACK_WEBHOOK_URL),
+            'slack_configured': bool(cls.SLACK_BOT_TOKEN),
+            'slack_channel_id': cls.SLACK_CHANNEL_ID,
             'schedule': cls.SCHEDULE_CRON,
             'port': cls.PORT,
             'debug': cls.DEBUG,

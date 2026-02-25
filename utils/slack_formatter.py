@@ -1,250 +1,400 @@
 """
-Slack message formatter for TARS analysis reports
-Formats AI analysis into rich Slack Block Kit messages
+Slack formatter for TARS analysis reports.
+
+Design:
+- Main message: header block + colored attachments per category + new trends
+- Thread reply: per-category ticket breakdown with matching colors
+- Colors assigned per category for visual grouping
+
+Uses slack_sdk.WebClient (chat.postMessage) for threading support.
 """
 import logging
-from typing import Dict, List
 from datetime import datetime
+from typing import Dict, List, Optional
+
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 
 logger = logging.getLogger(__name__)
 
-# Windscribe blue color for message accents
-WINDSCRIBE_BLUE = "#003E70"
+# ── Color palette ──────────────────────────────────────────────────────────────
+# 5 rotating colors for top known categories + 1 for new trends
+TOP5_COLORS = [
+    "#2563EB",  # blue
+    "#059669",  # green
+    "#D97706",  # amber
+    "#7C3AED",  # violet
+    "#0891B2",  # cyan
+]
+NEW_TREND_COLOR = "#DC2626"  # red — stands out for new/emerging trends
+
+# Max tickets shown per category in thread
+_THREAD_MAX_PER_CATEGORY = 25
 
 
 class SlackFormatter:
-    """Formats TARS analysis results into Slack Block Kit messages"""
-    
-    def __init__(self, supportpal_base_url: str):
+    """Formats and posts TARS analysis results to Slack."""
+
+    def __init__(
+        self,
+        supportpal_base_url: str,
+        slack_bot_token: str,
+        slack_channel_id: str,
+    ):
+        self.base_url = supportpal_base_url.rstrip("/")
+        self.channel = slack_channel_id
+        self.client = WebClient(token=slack_bot_token)
+
+    # ── Public posting interface ───────────────────────────────────────────────
+
+    def post_analysis(self, analysis: Dict) -> bool:
         """
-        Initialize Slack formatter
-        
-        Args:
-            supportpal_base_url: Base URL for SupportPal (e.g., https://support.int.windscribe.com)
+        Post the main summary, then threaded ticket breakdowns.
+        Returns True if the main message posted successfully.
         """
-        self.supportpal_base_url = supportpal_base_url.rstrip('/')
-        
-    def format_analysis(self, analysis: Dict) -> Dict:
+        number_to_id: Dict[int, int] = analysis.get("_number_to_id", {})
+        number_to_subject: Dict[int, str] = analysis.get("_number_to_subject", {})
+
+        blocks, attachments = self._build_main_message(analysis)
+
+        try:
+            resp = self.client.chat_postMessage(
+                channel=self.channel,
+                blocks=blocks,
+                attachments=attachments,
+                text=f"TARS Support Summary — {analysis.get('analysis_date', 'today')}",
+                unfurl_links=False,
+                unfurl_media=False,
+            )
+            thread_ts = resp["ts"]
+            logger.info(f"Main Slack message posted (ts={thread_ts})")
+        except SlackApiError as e:
+            logger.error(f"Slack API error posting main message: {e.response['error']}")
+            return False
+
+        # Post threaded breakdown (non-fatal)
+        try:
+            self._post_thread_breakdown(
+                thread_ts=thread_ts,
+                analysis=analysis,
+                number_to_id=number_to_id,
+                number_to_subject=number_to_subject,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to post thread breakdown: {e}")
+
+        return True
+
+    def post_no_tickets_message(self, hours: int) -> None:
+        try:
+            self.client.chat_postMessage(
+                channel=self.channel,
+                text=f"TARS: No new tickets found in the last {hours} hours.",
+            )
+        except SlackApiError as e:
+            logger.error(f"Slack error: {e.response['error']}")
+
+    def post_error_message(self, error_text: str) -> None:
+        try:
+            self.client.chat_postMessage(
+                channel=self.channel,
+                text=f"TARS Error: {error_text}",
+            )
+        except SlackApiError as e:
+            logger.error(f"Slack error: {e.response['error']}")
+
+    # ── Main message ───────────────────────────────────────────────────────────
+
+    def _build_main_message(self, analysis: Dict):
         """
-        Format analysis results into Slack Block Kit message
-        
-        Args:
-            analysis: Analysis dictionary from AI analyzer
-            
-        Returns:
-            Slack message payload ready to send via webhook
+        Build top-level blocks + colored attachments for the main message.
+        Returns (blocks, attachments).
         """
-        if not analysis:
-            return self._create_error_message("No analysis data available")
-        
-        blocks = []
-        
-        # Header section
-        blocks.extend(self._create_header(analysis))
-        
-        # Add divider
-        blocks.append({"type": "divider"})
-        
-        # Each cluster card
-        clusters = analysis.get('clusters', [])
-        for i, cluster in enumerate(clusters, 1):
-            blocks.extend(self._create_cluster_card(i, cluster))
-            
-            # Add divider between clusters (but not after last one)
-            if i < len(clusters):
-                blocks.append({"type": "divider"})
-        
-        # Footer
-        blocks.extend(self._create_footer())
-        
-        return {
-            "blocks": blocks,
-            "attachments": [
-                {
-                    "color": WINDSCRIBE_BLUE,
-                    "blocks": []
-                }
-            ]
-        }
-    
-    def _create_header(self, analysis: Dict) -> List[Dict]:
-        """Create the header section"""
-        total_tickets = analysis.get('total_tickets_analyzed', 0)
-        num_clusters = len(analysis.get('clusters', []))
-        analysis_date = analysis.get('analysis_date', datetime.now().strftime('%Y-%m-%d'))
-        
-        # Format timestamp
-        now = datetime.now()
-        timestamp = now.strftime('%B %d, %Y • %I:%M %p')
-        
-        return [
+        total = analysis.get("total_tickets_analyzed", 0)
+        date = analysis.get("analysis_date", datetime.now().strftime("%Y-%m-%d"))
+
+        # Top-level blocks: just the header
+        blocks = [
             {
                 "type": "header",
                 "text": {
                     "type": "plain_text",
-                    "text": "🚨 TARS Intelligence Report",
-                    "emoji": True
-                }
+                    "text": f"TARS Support Summary — {date}",
+                    "emoji": False,
+                },
             },
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"*{timestamp}*\n{total_tickets} tickets analyzed | {num_clusters} critical issues identified"
-                }
-            }
+                    "text": f"{total} tickets analyzed",
+                },
+            },
         ]
-    
-    def _create_cluster_card(self, cluster_num: int, cluster: Dict) -> List[Dict]:
-        """Create a rich card for a single cluster"""
-        blocks = []
-        
-        # Cluster number and title
-        emoji = self._get_cluster_emoji(cluster_num)
-        title = cluster.get('title', 'Unknown Issue')
-        
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": f"{emoji} *CLUSTER #{cluster_num}*\n*{title}*"
-            }
-        })
-        
-        # Volume, Region, Impact
-        volume = cluster.get('volume', 0)
-        region = cluster.get('geographic_pattern', 'Multiple/Unknown')
-        impact = cluster.get('user_impact', 'Unknown impact')
-        
-        blocks.append({
-            "type": "section",
-            "fields": [
-                {
-                    "type": "mrkdwn",
-                    "text": f"📊 *Volume:*\n{volume} tickets"
-                },
-                {
-                    "type": "mrkdwn",
-                    "text": f"🌍 *Region:*\n{region}"
-                },
-                {
-                    "type": "mrkdwn",
-                    "text": f"💥 *Impact:*\n{impact}"
-                }
-            ]
-        })
-        
-        # Probable Root Cause
-        root_cause = cluster.get('probable_root_cause', 'Unknown cause')
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": f"🔧 *Probable Root Cause:*\n{root_cause}"
-            }
-        })
-        
-        # Affected Tickets
-        ticket_ids = cluster.get('ticket_ids', [])
-        ticket_links = self._format_ticket_links(ticket_ids)
-        
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": f"🎫 *Affected Tickets:*\n{ticket_links}"
-            }
-        })
-        
-        # Note: Action buttons will be added once Notion/Dashboard is ready
-        
-        return blocks
-    
-    def _format_ticket_links(self, ticket_ids: List[int], max_display: int = 5) -> str:
-        """
-        Format ticket IDs as clickable Slack links
-        
-        Args:
-            ticket_ids: List of ticket IDs
-            max_display: Maximum number of tickets to show before "+X more"
-            
-        Returns:
-            Formatted string with ticket links
-        """
-        if not ticket_ids:
-            return "None"
-        
-        links = []
-        for ticket_id in ticket_ids[:max_display]:
-            url = f"{self.supportpal_base_url}/en/admin/ticket/view/{ticket_id}"
-            links.append(f"<{url}|#{ticket_id}>")
-        
-        result = " ".join(links)
-        
-        if len(ticket_ids) > max_display:
-            remaining = len(ticket_ids) - max_display
-            result += f" +{remaining} more"
-        
-        return result
-    
-    def _create_action_buttons(self, ticket_ids: List[int]) -> Dict:
-        """Create action buttons for the cluster"""
-        if not ticket_ids:
-            return None
-        
-        # Create filter URL for all tickets in cluster
-        # For now, we'll just link to the first ticket (can enhance later with filtered views)
-        first_ticket_url = f"{self.supportpal_base_url}/en/admin/ticket/view/{ticket_ids[0]}"
-        
-        return {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "View All Tickets",
-                        "emoji": True
-                    },
-                    "url": first_ticket_url,
-                    "action_id": "view_tickets"
-                }
-            ]
-        }
-    
-    def _create_footer(self) -> List[Dict]:
-        """Create footer section"""
-        return [
-            {
-                "type": "context",
-                "elements": [
+
+        attachments = []
+
+        # ── Top 5 known categories as colored attachments ──────────────────────
+        known = sorted(
+            [c for c in analysis.get("known_categories", []) if c.get("volume", 0) > 0],
+            key=lambda c: c.get("volume", 0),
+            reverse=True,
+        )
+        top5 = known[:5]
+        remaining = known[5:]
+        remaining_count = sum(c.get("volume", 0) for c in remaining)
+
+        # Summary attachment: "Today's Top Categories"
+        if top5:
+            for i, cat in enumerate(top5):
+                summary = cat.get("summary") or ""
+                summary_short = (summary.split(".")[0] + ".") if "." in summary else summary
+                color = TOP5_COLORS[i]
+
+                # Store the assigned color on the category dict for thread matching
+                cat["_color"] = color
+
+                attachments.append({
+                    "color": color,
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": (
+                                    f"*{cat['title']}* — {cat['volume']} tickets\n"
+                                    f"{summary_short}"
+                                ),
+                            },
+                        },
+                    ],
+                })
+
+            if remaining_count > 0:
+                attachments.append({
+                    "color": "#CCCCCC",
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f"_{len(remaining)} more categories ({remaining_count} tickets) — see thread for full breakdown_",
+                            },
+                        },
+                    ],
+                })
+
+        # ── New / Emerging Trends ──────────────────────────────────────────────
+        trends = analysis.get("new_trends", [])
+        number_to_id: Dict[int, int] = analysis.get("_number_to_id", {})
+        ticket_details: Dict[str, str] = analysis.get("ticket_details", {})
+
+        if trends:
+            trend_attachments = self._build_trend_attachments(
+                trends, number_to_id, ticket_details
+            )
+            attachments.extend(trend_attachments)
+        else:
+            attachments.append({
+                "color": "#22C55E",  # green = all good
+                "blocks": [
                     {
-                        "type": "mrkdwn",
-                        "text": "🤖 Generated by TARS • Automated Ticket Intelligence System"
-                    }
-                ]
-            }
-        ]
-    
-    def _get_cluster_emoji(self, cluster_num: int) -> str:
-        """Get emoji for cluster number"""
-        emojis = {
-            1: "🔥",
-            2: "💳",
-            3: "🛡️"
-        }
-        return emojis.get(cluster_num, "⚠️")
-    
-    def _create_error_message(self, error_text: str) -> Dict:
-        """Create an error message block"""
-        return {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "*New / Emerging Trends*\nNo unusual trends detected today.",
+                        },
+                    },
+                ],
+            })
+
+        # Footer
+        attachments.append({
+            "color": "#E2E8F0",
             "blocks": [
                 {
-                    "type": "section",
-                    "text": {
+                    "type": "context",
+                    "elements": [{
                         "type": "mrkdwn",
-                        "text": f"❌ *TARS Error*\n{error_text}"
-                    }
-                }
-            ]
-        }
+                        "text": "Full per-category ticket breakdown posted in thread below.",
+                    }],
+                },
+            ],
+        })
+
+        return blocks, attachments
+
+    def _build_trend_attachments(
+        self,
+        trends: List[Dict],
+        number_to_id: Dict[int, int],
+        ticket_details: Dict[str, str],
+    ) -> List[Dict]:
+        """Build red-colored attachments for new trends — always fully expanded."""
+        attachments = []
+        trend_count = sum(t.get("volume", 0) for t in trends)
+
+        for i, trend in enumerate(trends, 1):
+            title = trend.get("title", "Unknown Trend")
+            volume = trend.get("volume", 0)
+            description = trend.get("description", "")
+            geo = trend.get("geographic_pattern")
+            ticket_numbers = trend.get("ticket_numbers", [])
+
+            geo_suffix = f" | {geo}" if geo else ""
+            header = f"*New Trend: {title}* — {volume} tickets{geo_suffix}\n{description}"
+
+            # Individual ticket lines
+            ticket_lines = []
+            for num in ticket_numbers[:10]:
+                ticket_id = number_to_id.get(int(num))
+                detail = ticket_details.get(str(num), "")
+                if ticket_id:
+                    url = f"{self.base_url}/en/admin/ticket/view/{ticket_id}"
+                    line = f"<{url}|#{num}>"
+                    if detail:
+                        line += f": {detail}"
+                    ticket_lines.append(f"• {line}")
+                else:
+                    ticket_lines.append(f"• #{num}: {detail}" if detail else f"• #{num}")
+
+            if len(ticket_numbers) > 10:
+                ticket_lines.append(f"_+{len(ticket_numbers) - 10} more — see thread_")
+
+            full_text = header
+            if ticket_lines:
+                full_text += "\n" + "\n".join(ticket_lines)
+
+            # Truncate if needed
+            if len(full_text) > 2900:
+                full_text = full_text[:2880] + "\n..."
+
+            attachments.append({
+                "color": NEW_TREND_COLOR,
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": full_text},
+                    },
+                ],
+            })
+
+        return attachments
+
+    # ── Thread breakdown ───────────────────────────────────────────────────────
+
+    def _post_thread_breakdown(
+        self,
+        thread_ts: str,
+        analysis: Dict,
+        number_to_id: Dict[int, int],
+        number_to_subject: Dict[int, str],
+    ) -> None:
+        """
+        Post one threaded reply per active known category with color-coded
+        attachments matching the main message.
+        """
+        ticket_details: Dict[str, str] = analysis.get("ticket_details", {})
+        known = sorted(
+            [c for c in analysis.get("known_categories", []) if c.get("volume", 0) > 0],
+            key=lambda c: c.get("volume", 0),
+            reverse=True,
+        )
+
+        for cat in known:
+            # Use the color assigned in the main message, or gray for non-top-5
+            color = cat.get("_color", "#94A3B8")
+            attachments = self._build_category_thread_attachments(
+                cat, color, number_to_id, number_to_subject, ticket_details
+            )
+            if not attachments:
+                continue
+
+            try:
+                self.client.chat_postMessage(
+                    channel=self.channel,
+                    thread_ts=thread_ts,
+                    attachments=attachments,
+                    text=f"{cat['title']} — {cat['volume']} tickets",
+                    unfurl_links=False,
+                    unfurl_media=False,
+                )
+            except SlackApiError as e:
+                logger.warning(
+                    f"Failed to post thread for {cat['title']}: {e.response['error']}"
+                )
+
+        logger.info(f"Thread breakdown posted ({len(known)} categories)")
+
+    def _build_category_thread_attachments(
+        self,
+        cat: Dict,
+        color: str,
+        number_to_id: Dict[int, int],
+        number_to_subject: Dict[int, str],
+        ticket_details: Dict[str, str],
+    ) -> List[Dict]:
+        """Build color-coded attachments for a single category's thread reply."""
+        ticket_numbers = cat.get("ticket_numbers", [])
+        summary = cat.get("summary") or ""
+
+        # Header: category title + summary
+        header_text = f"*{cat['title']}* — {cat['volume']} tickets"
+        if summary:
+            header_text += f"\n_{summary}_"
+
+        # Build a compact text block: one line per ticket
+        # Format: • #NUMBER: Subject — Description  [link]
+        display_numbers = ticket_numbers[:_THREAD_MAX_PER_CATEGORY]
+        remainder = len(ticket_numbers) - len(display_numbers)
+
+        ticket_lines = []
+        for num in display_numbers:
+            ticket_id = number_to_id.get(int(num))
+            subject = number_to_subject.get(int(num), "No Subject")
+            detail = ticket_details.get(str(num), "")
+
+            if ticket_id:
+                url = f"{self.base_url}/en/admin/ticket/view/{ticket_id}"
+                line = f"• <{url}|*#{num}*>: {subject}"
+            else:
+                line = f"• *#{num}*: {subject}"
+
+            if detail and detail.lower() != subject.lower():
+                line += f"\n   _{detail}_"
+
+            ticket_lines.append(line)
+
+        if remainder > 0:
+            ticket_lines.append(f"\n_+{remainder} more tickets in this category_")
+
+        # Join into chunks of text that fit within Slack's 3000-char limit per block
+        full_text = header_text + "\n\n" + "\n".join(ticket_lines)
+
+        # Split into multiple text chunks if needed
+        text_chunks = []
+        current_chunk = ""
+        for line in [header_text, ""] + ticket_lines:
+            test = current_chunk + "\n" + line if current_chunk else line
+            if len(test) > 2800:
+                text_chunks.append(current_chunk)
+                current_chunk = line
+            else:
+                current_chunk = test
+        if current_chunk:
+            text_chunks.append(current_chunk)
+
+        # Each chunk becomes one attachment with the same color
+        attachments = []
+        for chunk_text in text_chunks:
+            attachments.append({
+                "color": color,
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": chunk_text},
+                    },
+                ],
+            })
+
+        return attachments

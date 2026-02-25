@@ -3,6 +3,7 @@ Slack Socket Mode app for TARS slash commands
 Handles /tars commands via WebSocket connection (no public IP needed)
 """
 import os
+import socket
 import logging
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -49,8 +50,10 @@ def get_pipeline():
             supportpal_api_key=os.getenv('SUPPORTPAL_API_KEY'),
             supportpal_api_url=os.getenv('SUPPORTPAL_API_URL'),
             openai_api_key=os.getenv('OPENAI_API_KEY'),
-            slack_webhook_url=os.getenv('SLACK_WEBHOOK_URL'),
-            mongodb_storage=storage
+            slack_bot_token=os.getenv('SLACK_BOT_TOKEN'),
+            slack_channel_id=os.getenv('SLACK_CHANNEL_ID'),
+            slack_webhook_url=os.getenv('SLACK_WEBHOOK_URL'),  # legacy fallback
+            mongodb_storage=storage,
         )
     return _pipeline
 
@@ -78,7 +81,8 @@ def handle_tars_command(ack, command, respond):
     
     try:
         text = command.get('text', '').strip()
-        logger.info(f"Received /tars command: {text}")
+        hostname = socket.gethostname()
+        logger.info(f"[{hostname}] Received /tars command: {text}")
         
         handler = get_command_handler()
         cmd, hours = handler.parse_command(text)
@@ -111,8 +115,10 @@ def handle_tars_command(ack, command, respond):
         
         # Handle analyze command
         if cmd == "analyze":
-            # Send immediate acknowledgment
-            respond(handler.format_analyzing_response(hours))
+            # Send immediate acknowledgment with instance identifier
+            ack_msg = handler.format_analyzing_response(hours)
+            ack_msg["text"] += f"\n_Instance: {hostname}_"
+            respond(ack_msg)
             
             # Run analysis
             try:
