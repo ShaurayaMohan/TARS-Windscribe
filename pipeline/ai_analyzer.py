@@ -313,14 +313,6 @@ ticket number. The key is the ticket number as a string, the value is the catego
 
 {{
   "analysis_date": "YYYY-MM-DD",
-  "classifications": {{
-    "TICKET_NUMBER": "category_id",
-    ... one entry for EVERY ticket in the input ...
-  }},
-  "ticket_summaries": {{
-    "TICKET_NUMBER": "one-liner max 12 words — what is the user's actual problem",
-    ... one entry for EVERY ticket in the input ...
-  }},
   "category_summaries": {{
     "category_id": "specific 1-2 sentence summary describing THIS batch (not the category definition)",
     ... only for categories that have at least 1 ticket ...
@@ -333,7 +325,15 @@ ticket number. The key is the ticket number as a string, the value is the catego
       "description": "2-3 sentences: what is happening, probable root cause, why it is genuinely new",
       "geographic_pattern": "Countries/regions affected, or null"
     }}
-  ]
+  ],
+  "classifications": {{
+    "TICKET_NUMBER": "category_id",
+    ... one entry for EVERY ticket in the input ...
+  }},
+  "ticket_summaries": {{
+    "TICKET_NUMBER": "one-liner max 12 words — what is the user's actual problem",
+    ... one entry for EVERY ticket in the input ...
+  }}
 }}
 
 HOW TO WRITE ticket_summaries — describe what the USER actually needs, not the category name:
