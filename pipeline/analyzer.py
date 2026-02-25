@@ -9,7 +9,9 @@ Step order (intentional):
   4. Post main Slack message
   5. Post threaded ticket breakdown to Slack
 """
+import re
 import logging
+from html import unescape
 from typing import Dict, Optional
 
 from pipeline.supportpal_client import SupportPalClient
@@ -17,6 +19,16 @@ from pipeline.ai_analyzer import AIAnalyzer
 from utils.slack_formatter import SlackFormatter
 
 logger = logging.getLogger(__name__)
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html(text: str) -> str:
+    """Remove HTML tags, decode entities, collapse whitespace."""
+    text = _TAG_RE.sub(" ", text)       # tags → space
+    text = unescape(text)               # &quot; &#039; etc → real chars
+    text = re.sub(r"\s+", " ", text)    # collapse whitespace
+    return text.strip()
 
 
 class TARSPipeline:
@@ -85,6 +97,11 @@ class TARSPipeline:
                 int(t["number"]): t.get("subject", "No Subject") for t in tickets
             }
 
+            # Strip HTML from first_message so both the AI and Slack see clean text
+            for t in tickets:
+                raw = t.get("first_message", "")
+                t["first_message"] = _strip_html(raw)
+
             # Build ticket_details from pipeline data (no longer from AI)
             # This ensures every ticket always has a description
             ticket_details: Dict[str, str] = {}
@@ -92,8 +109,8 @@ class TARSPipeline:
                 num = str(t["number"])
                 subject = t.get("subject", "")
                 msg = t.get("first_message", "")
-                # Use first ~120 chars of the message as a description
-                snippet = msg[:120].replace("\n", " ").strip()
+                # Use first ~150 chars of the clean message as a description
+                snippet = msg[:150].strip()
                 if snippet and snippet.lower() != subject.lower():
                     ticket_details[num] = snippet
                 else:
