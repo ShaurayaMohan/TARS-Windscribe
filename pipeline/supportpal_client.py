@@ -26,14 +26,40 @@ class SupportPalClient:
         self.session = requests.Session()
         self.session.auth = self.auth
         
-    def get_tickets_since(self, hours: int = 24, limit: int = 100) -> List[Dict]:
+    def list_brands(self) -> List[Dict]:
         """
-        Fetch tickets created in the last N hours
-        
+        List all brands configured in SupportPal.
+        Use this once to discover the numeric brand_id for Windscribe.
+
+        Returns:
+            List of brand dicts with at least 'id' and 'name' keys.
+        """
+        try:
+            response = self.session.get(
+                f"{self.api_url}/core/brand",
+                timeout=30,
+            )
+            response.raise_for_status()
+            data = response.json()
+            brands = data.get("data", [])
+            logger.info(f"Brands: {[(b.get('id'), b.get('name')) for b in brands]}")
+            return brands
+        except Exception as e:
+            logger.error(f"Error fetching brands: {e}")
+            return []
+
+    def get_tickets_since(
+        self, hours: int = 24, limit: int = 100, brand_id: Optional[int] = None
+    ) -> List[Dict]:
+        """
+        Fetch tickets created in the last N hours.
+
         Args:
             hours: Number of hours to look back (default: 24)
             limit: Maximum number of tickets per page (default: 100)
-            
+            brand_id: If set, only return tickets belonging to this brand.
+                      Find the correct ID by calling list_brands() once.
+
         Returns:
             List of ticket dictionaries
         """
@@ -42,12 +68,16 @@ class SupportPalClient:
         now_utc = datetime.now(timezone.utc)
         since_time = now_utc - timedelta(hours=hours)
         created_at_min = int(since_time.timestamp())
-        
-        logger.info(f"Fetching tickets created since {since_time} (timestamp: {created_at_min})")
-        
+
+        brand_msg = f" (brand_id={brand_id})" if brand_id else " (all brands)"
+        logger.info(
+            f"Fetching tickets created since {since_time}"
+            f" (timestamp: {created_at_min}){brand_msg}"
+        )
+
         all_tickets = []
         start = 1
-        
+
         while True:
             # Fetch page of tickets
             params = {
@@ -55,8 +85,10 @@ class SupportPalClient:
                 'start': start,
                 'limit': limit,
                 'order_column': 'created_at',
-                'order_direction': 'desc'
+                'order_direction': 'desc',
             }
+            if brand_id is not None:
+                params['brand_id'] = brand_id
             
             try:
                 response = self.session.get(
@@ -151,17 +183,20 @@ class SupportPalClient:
         
         return None
     
-    def get_tickets_for_analysis(self, hours: int = 24) -> List[Dict]:
+    def get_tickets_for_analysis(
+        self, hours: int = 24, brand_id: Optional[int] = None
+    ) -> List[Dict]:
         """
-        Fetch tickets and enrich with first message body for analysis
-        
+        Fetch tickets and enrich with first message body for analysis.
+
         Args:
             hours: Number of hours to look back (default: 24)
-            
+            brand_id: If set, only include tickets for this brand.
+
         Returns:
             List of tickets with 'id', 'subject', and 'first_message' fields
         """
-        tickets = self.get_tickets_since(hours=hours)
+        tickets = self.get_tickets_since(hours=hours, brand_id=brand_id)
         
         if not tickets:
             logger.warning("No tickets found in the specified time range")

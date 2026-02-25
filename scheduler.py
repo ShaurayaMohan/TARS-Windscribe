@@ -40,6 +40,7 @@ class TARSScheduler:
         """Initialize TARS pipeline"""
         if self.pipeline is None:
             self.init_storage()
+            _brand_raw = os.getenv('SUPPORTPAL_BRAND_ID', '').strip()
             self.pipeline = TARSPipeline(
                 supportpal_api_key=os.getenv('SUPPORTPAL_API_KEY'),
                 supportpal_api_url=os.getenv('SUPPORTPAL_API_URL'),
@@ -48,6 +49,7 @@ class TARSScheduler:
                 slack_channel_id=os.getenv('SLACK_CHANNEL_ID'),
                 slack_webhook_url=os.getenv('SLACK_WEBHOOK_URL'),  # legacy fallback
                 mongodb_storage=self.mongodb_storage,
+                supportpal_brand_id=int(_brand_raw) if _brand_raw else None,
             )
     
     def run_scheduled_analysis(self):

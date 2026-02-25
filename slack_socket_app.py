@@ -46,6 +46,7 @@ def get_pipeline():
     global _pipeline
     if _pipeline is None:
         storage = get_mongodb_storage()
+        _brand_raw = os.getenv('SUPPORTPAL_BRAND_ID', '').strip()
         _pipeline = TARSPipeline(
             supportpal_api_key=os.getenv('SUPPORTPAL_API_KEY'),
             supportpal_api_url=os.getenv('SUPPORTPAL_API_URL'),
@@ -54,6 +55,7 @@ def get_pipeline():
             slack_channel_id=os.getenv('SLACK_CHANNEL_ID'),
             slack_webhook_url=os.getenv('SLACK_WEBHOOK_URL'),  # legacy fallback
             mongodb_storage=storage,
+            supportpal_brand_id=int(_brand_raw) if _brand_raw else None,
         )
     return _pipeline
 

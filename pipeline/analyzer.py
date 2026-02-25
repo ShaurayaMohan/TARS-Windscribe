@@ -21,13 +21,32 @@ from utils.slack_formatter import SlackFormatter
 logger = logging.getLogger(__name__)
 
 _TAG_RE = re.compile(r"<[^>]+>")
+# Matches CSS/VML behavior blocks like: v\: {behavior:url(#default#VML);}
+# and any {...} block that contains "behavior" or is all CSS selectors
+_CSS_BEHAVIOR_RE = re.compile(r"[\w\\*.:]+\s*\{[^}]*\}", re.DOTALL)
+# Matches leftover Microsoft Office / VML artifacts that survive tag removal
+_VML_ARTIFACT_RE = re.compile(
+    r"\b(?:behavior|url\(#default#\w+\)|mso-\w[\w-]*|panose-\d|font-face"
+    r"|@font-face|@page|WordSection|MsoNormal|MsoBodyText)\b[^;}\n]*[;}\n]?",
+    re.IGNORECASE,
+)
 
 
 def _strip_html(text: str) -> str:
-    """Remove HTML tags, decode entities, collapse whitespace."""
-    text = _TAG_RE.sub(" ", text)       # tags → space
-    text = unescape(text)               # &quot; &#039; etc → real chars
-    text = re.sub(r"\s+", " ", text)    # collapse whitespace
+    """
+    Remove HTML tags, CSS/VML artifacts, decode entities, collapse whitespace.
+
+    Handles:
+    - Standard HTML tags: <div>, <br>, <pre> etc.
+    - CSS behavior blocks: v\\: {behavior:url(#default#VML);}
+    - Microsoft Office / VML leftovers from rich-text emails
+    - HTML entities: &quot; &#039; &amp; etc.
+    """
+    text = _TAG_RE.sub(" ", text)           # <tags> → space
+    text = _CSS_BEHAVIOR_RE.sub(" ", text)  # CSS {...} blocks → space
+    text = _VML_ARTIFACT_RE.sub(" ", text)  # VML/MSO artifacts → space
+    text = unescape(text)                   # &quot; &#039; etc → real chars
+    text = re.sub(r"\s+", " ", text)        # collapse whitespace
     return text.strip()
 
 
@@ -44,8 +63,11 @@ class TARSPipeline:
         mongodb_storage=None,
         # Legacy webhook kept for fallback / error messages only
         slack_webhook_url: Optional[str] = None,
+        # Optional brand_id to restrict to Windscribe tickets only
+        supportpal_brand_id: Optional[int] = None,
     ):
         self.supportpal_client = SupportPalClient(supportpal_api_url, supportpal_api_key)
+        self.supportpal_brand_id = supportpal_brand_id
         self.ai_analyzer = AIAnalyzer(openai_api_key)
 
         # Extract base URL for SupportPal ticket links
@@ -78,7 +100,9 @@ class TARSPipeline:
 
             # ── Step 1: Fetch tickets ──────────────────────────────────────────
             logger.info("Step 1/5: Fetching tickets from SupportPal...")
-            tickets = self.supportpal_client.get_tickets_for_analysis(hours=hours)
+            tickets = self.supportpal_client.get_tickets_for_analysis(
+                hours=hours, brand_id=self.supportpal_brand_id
+            )
 
             if not tickets:
                 logger.warning(f"No tickets found in the last {hours} hours")
@@ -97,24 +121,24 @@ class TARSPipeline:
                 int(t["number"]): t.get("subject", "No Subject") for t in tickets
             }
 
-            # Strip HTML from first_message so both the AI and Slack see clean text
+            # Strip HTML + VML/CSS from first_message before AI sees it or it
+            # ends up in fallback snippets.
             for t in tickets:
                 raw = t.get("first_message", "")
                 t["first_message"] = _strip_html(raw)
 
-            # Build ticket_details from pipeline data (no longer from AI)
-            # This ensures every ticket always has a description
-            ticket_details: Dict[str, str] = {}
+            # Build fallback ticket_details from pipeline data.
+            # These are used ONLY if the AI does not provide a summary for a ticket.
+            fallback_details: Dict[str, str] = {}
             for t in tickets:
                 num = str(t["number"])
                 subject = t.get("subject", "")
                 msg = t.get("first_message", "")
-                # Use first ~150 chars of the clean message as a description
-                snippet = msg[:150].strip()
+                snippet = msg[:120].strip()
                 if snippet and snippet.lower() != subject.lower():
-                    ticket_details[num] = snippet
+                    fallback_details[num] = snippet
                 else:
-                    ticket_details[num] = subject
+                    fallback_details[num] = subject
 
             # ── Step 2: AI Analysis ────────────────────────────────────────────
             logger.info("Step 2/5: Analyzing tickets with AI...")
@@ -138,8 +162,23 @@ class TARSPipeline:
             analysis["_number_to_id"] = number_to_id
             analysis["_number_to_subject"] = number_to_subject
 
-            # Attach pipeline-built ticket_details (overrides any AI-produced ones)
+            # Merge ticket_details: prefer AI-generated one-liners, fall back to
+            # the cleaned message snippet for any ticket the AI missed.
+            ai_summaries: Dict[str, str] = analysis.pop("ticket_summaries", {})
+            ticket_details: Dict[str, str] = {}
+            for t in tickets:
+                num = str(t["number"])
+                ai_summary = ai_summaries.get(num, "").strip()
+                if ai_summary:
+                    ticket_details[num] = ai_summary
+                else:
+                    ticket_details[num] = fallback_details.get(num, t.get("subject", ""))
+
             analysis["ticket_details"] = ticket_details
+            logger.info(
+                f"ticket_details: {len(ai_summaries)} AI summaries, "
+                f"{len(ticket_details) - len(ai_summaries)} fallbacks"
+            )
 
             num_known_active = len(
                 [c for c in analysis.get("known_categories", []) if c.get("volume", 0) > 0]

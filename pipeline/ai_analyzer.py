@@ -317,6 +317,10 @@ ticket number. The key is the ticket number as a string, the value is the catego
     "TICKET_NUMBER": "category_id",
     ... one entry for EVERY ticket in the input ...
   }},
+  "ticket_summaries": {{
+    "TICKET_NUMBER": "one-liner max 12 words — what is the user's actual problem",
+    ... one entry for EVERY ticket in the input ...
+  }},
   "category_summaries": {{
     "category_id": "specific 1-2 sentence summary describing THIS batch (not the category definition)",
     ... only for categories that have at least 1 ticket ...
@@ -332,7 +336,11 @@ ticket number. The key is the ticket number as a string, the value is the catego
   ]
 }}
 
-CRITICAL — classifications must have EXACTLY {ticket_count} entries, one per ticket:
+HOW TO WRITE ticket_summaries — describe what the USER actually needs, not the category name:
+  BAD: "User has a connection problem" / "Payment issue" / "Refund request"
+  GOOD: "Can't connect via WireGuard on Rostelecom ISP, Russia" / "Crypto payment sent 3 days ago, account still free" / "Forgot password, no longer has access to signup email"
+
+CRITICAL — classifications AND ticket_summaries must each have EXACTLY {ticket_count} entries:
 {all_ticket_numbers}
 
 === TICKETS TO CLASSIFY ({ticket_count} total) ===
@@ -416,6 +424,7 @@ CRITICAL — classifications must have EXACTLY {ticket_count} entries, one per t
 
             # ── Build known_categories from flat classifications dict ──────
             classifications: Dict[str, str] = raw.get("classifications", {})
+            ticket_summaries: Dict[str, str] = raw.get("ticket_summaries", {})
             category_summaries: Dict[str, str] = raw.get("category_summaries", {})
             trends_raw: list = raw.get("new_trends", [])
 
@@ -525,6 +534,9 @@ CRITICAL — classifications must have EXACTLY {ticket_count} entries, one per t
                 "total_tickets_analyzed": len(tickets),
                 "known_categories": known_categories,
                 "new_trends": new_trends,
+                # Raw per-ticket summaries — keyed by ticket number as string
+                # Used by pipeline/analyzer.py to build ticket_details
+                "ticket_summaries": {str(k): v for k, v in ticket_summaries.items()},
             }
 
             # ── Summary logging ───────────────────────────────────────────

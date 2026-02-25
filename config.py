@@ -15,6 +15,12 @@ class Config:
     # SupportPal API Configuration
     SUPPORTPAL_API_KEY = os.getenv('SUPPORTPAL_API_KEY')
     SUPPORTPAL_API_URL = os.getenv('SUPPORTPAL_API_URL')
+    # Optional: numeric brand ID to restrict ticket fetching to Windscribe only.
+    # Leave blank to fetch all brands. Find the ID by running: python3 -c
+    # "from pipeline.supportpal_client import SupportPalClient; ..."
+    # or by checking the SupportPal admin panel Settings > Brands.
+    _brand_id_raw = os.getenv('SUPPORTPAL_BRAND_ID', '').strip()
+    SUPPORTPAL_BRAND_ID: 'Optional[int]' = int(_brand_id_raw) if _brand_id_raw else None
     
     # OpenAI Configuration
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
