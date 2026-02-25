@@ -278,14 +278,31 @@ You will receive {ticket_count} support tickets. You must:
 3. Write a 1-2 sentence summary for each category that has tickets.
 
 === NEW TREND RULES ===
-Only create a new trend if:
-  - At least 2 tickets share the SAME specific, concrete technical issue
+Only create a new trend if ALL of these are true:
+  - At least 2 tickets share the EXACT SAME specific technical issue (same error, same region, same app version)
   - It cannot be reasonably force-fit into any known category
-  - It is NOT a catch-all (no "Miscellaneous", "Other", "General", "Various", "Feedback")
-On a normal day, new_trends will be empty. That is expected.
+  - It is NOT a catch-all (forbidden titles: "Miscellaneous", "Other", "General", "Various", "Feedback", "Unrelated", "Unknown")
+On a normal day, new_trends will be EMPTY. That is the expected outcome.
+SPAM, vendor emails, off-topic emails, and irrelevant submissions are NOT new trends — classify them
+into the closest known category (usually "plan_feature_confusion" or "lost_access_password_reset").
 
 === KNOWN CATEGORIES ===
 {categories_detail}
+
+=== HOW TO WRITE category_summaries ===
+
+Summaries must describe THIS SPECIFIC BATCH of tickets — what you actually saw in the data.
+Do NOT just rephrase the category definition.
+
+BAD (generic, just echoes the definition):
+  "refund_requests": "Refund requests are from users who want their money back."
+  "lost_access_password_reset": "Users cannot log into their account."
+
+GOOD (specific to this batch):
+  "refund_requests": "9 refund requests, mostly from users in Iran and Russia blocked after the Jan wave. 3 cite expired Paymentwall transactions."
+  "lost_access_password_reset": "14 lockouts — majority forgot their password; 3 signed up via Apple and lost the linked email."
+
+Write 1-2 sentences. Mention specific numbers, regions, protocols, platforms, or error patterns you saw.
 
 === OUTPUT FORMAT ===
 
@@ -301,15 +318,15 @@ ticket number. The key is the ticket number as a string, the value is the catego
     ... one entry for EVERY ticket in the input ...
   }},
   "category_summaries": {{
-    "category_id": "1-2 sentence summary. Specific: mention protocols, regions, errors seen.",
+    "category_id": "specific 1-2 sentence summary describing THIS batch (not the category definition)",
     ... only for categories that have at least 1 ticket ...
   }},
   "new_trends": [
     {{
-      "title": "Short specific name",
-      "ticket_numbers": [integer ticket numbers],
+      "title": "Short specific name (e.g. 'iOS 18.3 Crash on Launch', 'Turkey WireGuard Block Wave')",
+      "ticket_numbers": [integer ticket numbers — minimum 2],
       "volume": integer,
-      "description": "2-3 sentences: what is happening, probable root cause",
+      "description": "2-3 sentences: what is happening, probable root cause, why it is genuinely new",
       "geographic_pattern": "Countries/regions affected, or null"
     }}
   ]
@@ -450,11 +467,50 @@ CRITICAL — classifications must have EXACTLY {ticket_count} entries, one per t
                 for num_str in missing:
                     category_tickets[FALLBACK_CATEGORY].append(int(num_str))
 
-            # Build the known_categories list in the same format as before
+            # ── Validate and clean new_trends ─────────────────────────────
+            # Discard any trend that doesn't meet minimum bar (volume < 2 OR
+            # generic/empty title). Rescued tickets get reclassified from the
+            # flat classifications dict, or fall back to the fallback category.
+            GENERIC_TITLES = {"unknown", "unknown trend", "misc", "miscellaneous",
+                               "other", "general", "various", "feedback", "n/a"}
+
+            new_trends = []
+            for trend in trends_raw:
+                nums = list(dict.fromkeys(trend.get("ticket_numbers", [])))
+                title = (trend.get("title") or "").strip()
+                volume = len(nums)
+
+                title_is_generic = title.lower() in GENERIC_TITLES or not title
+
+                if volume < 2 or title_is_generic:
+                    # Rescue these tickets back into known categories
+                    rescued_count = 0
+                    for num in nums:
+                        num_str = str(num)
+                        cat_id = classifications.get(num_str)
+                        if cat_id and cat_id in valid_category_ids:
+                            category_tickets[cat_id].append(int(num_str))
+                        else:
+                            category_tickets[FALLBACK_CATEGORY].append(int(num_str))
+                        rescued_count += 1
+                    if rescued_count:
+                        reason = (
+                            f"volume={volume} < 2" if volume < 2
+                            else f"generic title '{title}'"
+                        )
+                        logger.info(
+                            f"Discarded trend '{title}' ({reason}) — "
+                            f"{rescued_count} tickets rescued to known categories"
+                        )
+                    continue  # skip — don't add to new_trends
+
+                new_trends.append({**trend, "ticket_numbers": nums, "volume": volume})
+
+            # Rebuild known_categories now that rescued tickets may have changed volumes
             known_categories = []
             for cat in KNOWN_CATEGORIES:
                 cid = cat["category_id"]
-                nums = list(dict.fromkeys(category_tickets[cid]))  # dedupe, preserve order
+                nums = list(dict.fromkeys(category_tickets[cid]))
                 known_categories.append({
                     "category_id": cid,
                     "title": cat["title"],
@@ -462,12 +518,6 @@ CRITICAL — classifications must have EXACTLY {ticket_count} entries, one per t
                     "volume": len(nums),
                     "summary": category_summaries.get(cid, None),
                 })
-
-            # Clean up new_trends (deduplicate ticket_numbers within each trend)
-            new_trends = []
-            for trend in trends_raw:
-                nums = list(dict.fromkeys(trend.get("ticket_numbers", [])))
-                new_trends.append({**trend, "ticket_numbers": nums, "volume": len(nums)})
 
             # Build final analysis object in the same shape the rest of the pipeline expects
             analysis = {
