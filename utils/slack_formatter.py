@@ -148,24 +148,25 @@ class SlackFormatter:
         if top5:
             for i, cat in enumerate(top5):
                 summary = cat.get("summary") or ""
-                summary_short = (summary.split(".")[0] + ".") if "." in summary else summary
-                color = TOP5_COLORS[i]
+                # Take first sentence for brevity
+                if summary and "." in summary:
+                    summary_short = summary.split(".")[0].strip() + "."
+                else:
+                    summary_short = summary.strip()
 
-                # Store the assigned color on the category dict for thread matching
+                color = TOP5_COLORS[i]
                 cat["_color"] = color
+
+                text = f"*{cat['title']}* — {cat['volume']} tickets"
+                if summary_short:
+                    text += f"\n_{summary_short}_"
 
                 attachments.append({
                     "color": color,
                     "blocks": [
                         {
                             "type": "section",
-                            "text": {
-                                "type": "mrkdwn",
-                                "text": (
-                                    f"*{cat['title']}* — {cat['volume']} tickets\n"
-                                    f"{summary_short}"
-                                ),
-                            },
+                            "text": {"type": "mrkdwn", "text": text},
                         },
                     ],
                 })

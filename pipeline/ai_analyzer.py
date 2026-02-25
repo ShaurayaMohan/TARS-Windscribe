@@ -329,7 +329,7 @@ before you assign them to categories. This ensures no ticket is forgotten.
       "title": "string",
       "ticket_numbers": [list of integer ticket numbers — NO DUPLICATES],
       "volume": integer,
-      "summary": "2-3 sentence summary of what is happening in THIS batch for this category. Be specific about patterns, protocols, regions, or errors you see across these tickets. If volume is 0, write null."
+      "summary": "REQUIRED — 1-2 sentence summary of what is happening in THIS batch. Be specific about patterns, protocols, regions, or errors. If volume is 0, write 'No tickets today'."
     }}
   ],
   "new_trends": [
