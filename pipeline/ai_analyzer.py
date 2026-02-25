@@ -298,44 +298,35 @@ ZERO new trends on most days. Only flag something as a new trend when it is genu
 
 1. EVERY ticket number must appear in EXACTLY ONE place: either in ONE known_category's
    ticket_numbers list OR in ONE new_trend's ticket_numbers list.
-   *** CRITICAL: A ticket number MUST NEVER be repeated. Each number appears ONCE in ONE array. ***
-   *** If you find yourself writing the same number twice — STOP and move on. ***
-2. Sum of all volumes across known_categories + new_trends MUST equal {ticket_count}.
-3. All ticket numbers that must be accounted for: {all_ticket_numbers}
-4. For known_categories: include ALL {len(KNOWN_CATEGORIES)} category entries in your output,
+   *** CRITICAL: No ticket may be omitted. No ticket may be duplicated. ***
+2. Sum of all volumes across known_categories + new_trends MUST equal EXACTLY {ticket_count}.
+3. Complete ticket list: {all_ticket_numbers}
+   Every single number above MUST appear exactly once in your output arrays.
+4. For known_categories: include ALL {len(KNOWN_CATEGORIES)} category entries,
    even if a category has 0 tickets (set volume=0 and ticket_numbers=[]).
-5. For new_trends: only include trends that have volume >= 2 AND describe a specific novel issue.
+5. For new_trends: only include trends with volume >= 2 AND a specific novel issue.
    An empty new_trends array is the EXPECTED outcome on a normal day.
-6. ticket_details: for EVERY ticket number in the input, provide a one-line plain-English summary
-   (15–25 words) of what the user is reporting.
-7. Keep ticket_numbers arrays COMPACT — just the raw numbers, no extras, no repetitions.
 
 === OUTPUT FORMAT ===
 
 Return ONLY valid JSON. No markdown, no commentary, no code fences.
 
-IMPORTANT: Output ticket_details FIRST. This forces you to read and summarize every ticket
-before you assign them to categories. This ensures no ticket is forgotten.
-
 {{
   "analysis_date": "YYYY-MM-DD",
   "total_tickets_analyzed": {ticket_count},
-  "ticket_details": {{
-    "TICKET_NUMBER_AS_STRING": "One-line summary of what this user is reporting (15-25 words)"
-  }},
   "known_categories": [
     {{
       "category_id": "string (must match one of the category_id values above)",
       "title": "string",
-      "ticket_numbers": [list of integer ticket numbers — NO DUPLICATES],
+      "ticket_numbers": [integer ticket numbers — NO DUPLICATES],
       "volume": integer,
-      "summary": "REQUIRED — 1-2 sentence summary of what is happening in THIS batch. Be specific about patterns, protocols, regions, or errors. If volume is 0, write 'No tickets today'."
+      "summary": "REQUIRED — 1-2 sentence summary of this batch. Mention specific patterns, protocols, regions, or errors. If volume is 0, write 'No tickets today'."
     }}
   ],
   "new_trends": [
     {{
       "title": "Short specific name (e.g. 'iOS 19.2 Crash on Launch', 'Turkey Block Wave')",
-      "ticket_numbers": [list of integer ticket numbers — NO DUPLICATES],
+      "ticket_numbers": [integer ticket numbers — NO DUPLICATES],
       "volume": integer,
       "description": "2-3 sentences: what is happening, probable root cause, why it doesn't fit known categories",
       "geographic_pattern": "Countries/regions affected, or null"
@@ -347,12 +338,9 @@ before you assign them to categories. This ensures no ticket is forgotten.
 
 {tickets_formatted}
 
-=== FINAL VERIFICATION ===
-Before outputting, confirm:
-- known_categories array has exactly {len(KNOWN_CATEGORIES)} entries
-- sum of all ticket_numbers lengths across known_categories + new_trends == {ticket_count}
-- ticket_details has exactly {ticket_count} entries
-- every number in {all_ticket_numbers} appears exactly once across all ticket_numbers arrays"""
+=== FINAL VERIFICATION (do this before outputting) ===
+Count every ticket_number across all known_categories and new_trends arrays.
+The total MUST be exactly {ticket_count}. If it is not, you have missed tickets — go back and fix it."""
 
         return prompt
 

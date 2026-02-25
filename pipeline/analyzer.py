@@ -85,6 +85,20 @@ class TARSPipeline:
                 int(t["number"]): t.get("subject", "No Subject") for t in tickets
             }
 
+            # Build ticket_details from pipeline data (no longer from AI)
+            # This ensures every ticket always has a description
+            ticket_details: Dict[str, str] = {}
+            for t in tickets:
+                num = str(t["number"])
+                subject = t.get("subject", "")
+                msg = t.get("first_message", "")
+                # Use first ~120 chars of the message as a description
+                snippet = msg[:120].replace("\n", " ").strip()
+                if snippet and snippet.lower() != subject.lower():
+                    ticket_details[num] = snippet
+                else:
+                    ticket_details[num] = subject
+
             # ── Step 2: AI Analysis ────────────────────────────────────────────
             logger.info("Step 2/5: Analyzing tickets with AI...")
             custom_template = None
@@ -106,6 +120,9 @@ class TARSPipeline:
             # Attach mapping so the formatter can build links without re-fetching
             analysis["_number_to_id"] = number_to_id
             analysis["_number_to_subject"] = number_to_subject
+
+            # Attach pipeline-built ticket_details (overrides any AI-produced ones)
+            analysis["ticket_details"] = ticket_details
 
             num_known_active = len(
                 [c for c in analysis.get("known_categories", []) if c.get("volume", 0) > 0]
