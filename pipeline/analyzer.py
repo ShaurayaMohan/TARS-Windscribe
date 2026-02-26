@@ -68,6 +68,14 @@ class TARSPipeline:
     ):
         self.supportpal_client = SupportPalClient(supportpal_api_url, supportpal_api_key)
         self.supportpal_brand_id = supportpal_brand_id
+
+        if supportpal_brand_id is None:
+            logger.warning(
+                "SUPPORTPAL_BRAND_ID is not set — fetching ALL brands (Windscribe + ControlD). "
+                "Set SUPPORTPAL_BRAND_ID=1 in .env to restrict to Windscribe tickets only."
+            )
+        else:
+            logger.info(f"Brand filter active: only fetching brand_id={supportpal_brand_id} tickets")
         self.ai_analyzer = AIAnalyzer(openai_api_key)
 
         # Extract base URL for SupportPal ticket links

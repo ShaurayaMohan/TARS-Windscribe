@@ -197,13 +197,32 @@ class SupportPalClient:
             List of tickets with 'id', 'subject', and 'first_message' fields
         """
         tickets = self.get_tickets_since(hours=hours, brand_id=brand_id)
-        
+
         if not tickets:
             logger.warning("No tickets found in the specified time range")
             return []
-        
+
+        # ── Client-side brand filter ───────────────────────────────────────
+        # Always filter client-side even if brand_id was sent as an API param,
+        # because not all SupportPal versions honour that query parameter.
+        if brand_id is not None:
+            before = len(tickets)
+            tickets = [t for t in tickets if t.get('brand_id') == brand_id]
+            filtered = before - len(tickets)
+            logger.info(
+                f"Brand filter (brand_id={brand_id}): "
+                f"kept {len(tickets)}/{before} tickets"
+                + (f", dropped {filtered} non-Windscribe tickets" if filtered else "")
+            )
+            if not tickets:
+                logger.warning(
+                    f"All {before} tickets were filtered out by brand_id={brand_id}. "
+                    "Check that SUPPORTPAL_BRAND_ID is correct (run list_brands() to verify)."
+                )
+                return []
+
         enriched_tickets = []
-        
+
         for ticket in tickets:
             ticket_id = ticket.get('id')
             subject = ticket.get('subject', 'No Subject')
