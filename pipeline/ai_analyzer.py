@@ -142,10 +142,7 @@ KNOWN_CATEGORIES: List[Dict[str, str]] = [
         "description": (
             "User bought a plan but is confused about what they see in the app. Tickets ask why they "
             "still see 'Free' servers with stars, why their custom plan doesn't have unlimited data, "
-            "or complain that a specific server they were looking for isn't listed. "
-            "NOT a catch-all for tickets that don't fit elsewhere. App crashes, OS-specific bugs, "
-            "extension malfunctions, and unrecognised technical failures must never be placed here — "
-            "flag them as new_trend instead."
+            "or complain that a specific server they were looking for isn't listed."
         ),
     },
     {
@@ -275,33 +272,34 @@ class AIAnalyzer:
 
         prompt = f"""You are TARS, an AI assistant for the Windscribe VPN support operations team.
 
-=== YOUR TASK ===
+=== YOUR TASK (two passes) ===
 
-You will receive {ticket_count} support tickets. You must:
+You will receive {ticket_count} support tickets. Work in this order:
 
-1. Assign EVERY ticket to exactly one known category (see list below).
-2. If a ticket genuinely does not fit any known category, assign it to a new trend instead.
-3. Write a 1-2 sentence summary for each category that has tickets.
+PASS 1 — NEW TREND SCAN:
+  Scan ALL tickets first. Look for groups of 2+ tickets that share the same
+  specific root cause which is NOT described by any of the known categories below.
+  If you find such a group, mark those tickets as a new trend.
+
+PASS 2 — CLASSIFY THE REST:
+  Assign every remaining ticket to exactly one known category.
+  Write a 1-2 sentence summary for each category that has tickets.
 
 === NEW TREND RULES ===
-Only create a new trend if ALL of these are true:
-  - At least 2 tickets share the EXACT SAME specific technical issue (same error, same region, same app version)
-  - It cannot be reasonably force-fit into any known category
-  - It is NOT a catch-all (forbidden titles: "Miscellaneous", "Other", "General", "Various", "Feedback", "Unrelated", "Unknown")
-On a normal day, new_trends will be EMPTY. That is the expected outcome.
-SPAM, vendor emails, off-topic emails, and irrelevant submissions are NOT new trends — classify them
-into the closest known category (usually "plan_feature_confusion" or "lost_access_password_reset").
+A new trend is any recurring issue where >= 2 tickets share the same specific
+root cause AND that root cause is not already described by a known category.
+The PROBLEM TYPE itself matters — if no known category covers this KIND of
+problem, it is a new trend regardless of surface-level keyword similarity.
 
-A new trend is any recurring issue where >= 2 tickets share the same specific root cause AND that
-root cause is not already described by a known category. The PROBLEM TYPE itself matters — if no
-known category covers this KIND of problem, it is a new trend regardless of surface-level keyword
-similarity to another category.
+Most days will have 0-2 new trends. Zero is fine. So is two or three if the data supports it.
 
-CORE PROBLEM TYPE TEST: Before assigning a ticket to a known category, ask:
-"Does the CORE problem described in this ticket match the typical problem in that category?"
-If a ticket describes an app crash → it is NOT a Plan & Feature Confusion ticket.
-If a ticket describes the Windscribe extension breaking video calls → it is NOT a Website/IP Ban ticket.
-When the core problem type doesn't match, use new_trend.
+Constraints:
+  - Minimum 2 tickets to form a trend
+  - NOT a catch-all (forbidden titles: "Miscellaneous", "Other", "General", "Various", "Feedback", "Unrelated", "Unknown")
+  - SPAM, vendor emails, off-topic emails are NOT trends — classify them into the closest known category
+
+A ticket only fits a known category if its core problem type genuinely matches
+that category's scope. When in doubt, prefer new_trend over forcing a bad fit.
 
 === KNOWN CATEGORIES ===
 {categories_detail}
