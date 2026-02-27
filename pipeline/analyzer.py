@@ -32,6 +32,24 @@ _VML_ARTIFACT_RE = re.compile(
 )
 
 
+_CHATLOG_PREFIX_RE = re.compile(
+    r"^(?:Issue Summary\s*)?Chatlog\s+\d{2}:\d{2}:\d{2}\s+UTC\s*\|\s*(?:user|garry|agent):\s*",
+    re.IGNORECASE,
+)
+
+
+def _clean_chatlog_prefix(text: str) -> str:
+    """Strip SupportPal 'Issue Summary Chatlog HH:MM:SS UTC | user:' prefixes."""
+    # Remove leading "Issue Summary Chatlog ..." prefix
+    text = _CHATLOG_PREFIX_RE.sub("", text.strip())
+    # Also handle multiple chatlog lines — just take content after last 'user:'
+    if "| user:" in text:
+        parts = text.split("| user:")
+        # Take the last user message as the most relevant content
+        text = parts[-1].strip() if len(parts) > 1 else parts[0].strip()
+    return text.strip()
+
+
 def _strip_html(text: str) -> str:
     """
     Remove HTML tags, CSS/VML artifacts, decode entities, collapse whitespace.
@@ -142,7 +160,9 @@ class TARSPipeline:
                 num = str(t["number"])
                 subject = t.get("subject", "")
                 msg = t.get("first_message", "")
-                snippet = msg[:120].strip()
+                # Strip common SupportPal chatlog prefixes
+                msg = _clean_chatlog_prefix(msg)
+                snippet = msg[:150].strip()
                 if snippet and snippet.lower() != subject.lower():
                     fallback_details[num] = snippet
                 else:
@@ -174,18 +194,20 @@ class TARSPipeline:
             # the cleaned message snippet for any ticket the AI missed.
             ai_summaries: Dict[str, str] = analysis.pop("ticket_summaries", {})
             ticket_details: Dict[str, str] = {}
+            ai_used = 0
             for t in tickets:
                 num = str(t["number"])
-                ai_summary = ai_summaries.get(num, "").strip()
-                if ai_summary:
+                ai_summary = ai_summaries.get(num, "").strip().strip("'\"")
+                if ai_summary and not ai_summary.startswith("Issue Summary Chatlog"):
                     ticket_details[num] = ai_summary
+                    ai_used += 1
                 else:
                     ticket_details[num] = fallback_details.get(num, t.get("subject", ""))
 
             analysis["ticket_details"] = ticket_details
             logger.info(
-                f"ticket_details: {len(ai_summaries)} AI summaries, "
-                f"{len(ticket_details) - len(ai_summaries)} fallbacks"
+                f"ticket_details: {ai_used} AI summaries used, "
+                f"{len(ticket_details) - ai_used} fallbacks"
             )
 
             num_known_active = len(
