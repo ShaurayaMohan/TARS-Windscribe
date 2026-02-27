@@ -121,9 +121,10 @@ KNOWN_CATEGORIES: List[Dict[str, str]] = [
         "description": (
             "Any issue related to payments, billing, or card management. This includes: payment gateway "
             "rejections or declines (error codes from Paymentwall, Apple App Store, Google Play), "
-            "inability to update or change a billing card, purchases or renewals not reflected in the "
-            "account (user paid but still shows Free), double charges, and general billing inquiries. "
-            "If the ticket mentions a card, invoice, charge, or purchase problem, it belongs here."
+            "anti-abuse system payment blocks, inability to update or change a billing card, purchases "
+            "or renewals not reflected in the account (user paid but still shows Free), double charges, "
+            "and general billing inquiries. "
+            "If the ticket mentions a card, invoice, charge, purchase problem, or payment block, it belongs here."
         ),
     },
     {
