@@ -279,11 +279,15 @@ You will receive {ticket_count} support tickets. Work in this order:
 PASS 1 — NEW TREND SCAN:
   Scan ALL tickets first. Look for groups of 2+ tickets that share the same
   specific root cause which is NOT described by any of the known categories below.
-  If you find such a group, mark those tickets as a new trend.
+  If you find such a group, add them to new_trends.
 
-PASS 2 — CLASSIFY THE REST:
-  Assign every remaining ticket to exactly one known category.
+PASS 2 — CLASSIFY EVERY TICKET:
+  Assign EVERY ticket to exactly one known category — including tickets that
+  are also in a new trend (give them the closest known category).
   Write a 1-2 sentence summary for each category that has tickets.
+
+IMPORTANT: The "classifications" dict must have an entry for ALL {ticket_count} tickets.
+No ticket may be skipped. Trend tickets still need a classification.
 
 === NEW TREND RULES ===
 A new trend is any recurring issue where >= 2 tickets share the same specific
