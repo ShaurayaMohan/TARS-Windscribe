@@ -117,11 +117,13 @@ KNOWN_CATEGORIES: List[Dict[str, str]] = [
     },
     {
         "category_id": "payment_failures",
-        "title": "Payment Failures / Declines",
+        "title": "Payment & Billing Issues",
         "description": (
-            "User is trying to purchase a plan but the payment gateway rejects them. Tickets include "
-            "error codes from Paymentwall, Apple App Store, or Google Play, or state that their credit "
-            "card was declined despite having funds."
+            "Any issue related to payments, billing, or card management. This includes: payment gateway "
+            "rejections or declines (error codes from Paymentwall, Apple App Store, Google Play), "
+            "inability to update or change a billing card, purchases or renewals not reflected in the "
+            "account (user paid but still shows Free), double charges, and general billing inquiries. "
+            "If the ticket mentions a card, invoice, charge, or purchase problem, it belongs here."
         ),
     },
     {
@@ -137,9 +139,12 @@ KNOWN_CATEGORIES: List[Dict[str, str]] = [
         "category_id": "plan_feature_confusion",
         "title": "Plan & Feature Confusion",
         "description": (
-            "User bought a plan but is confused about what they see in the app. Tickets ask why they "
-            "still see 'Free' servers with stars, why their custom plan doesn't have unlimited data, "
-            "or complain that a specific server they were looking for isn't listed."
+            "ONLY for users confused about what their plan includes or what they see inside the app. "
+            "Tickets ask why they still see 'Free' servers with stars, why their custom plan doesn't "
+            "have unlimited data, why a specific server or location isn't listed, or what the difference "
+            "between Pro and Build-A-Plan is. "
+            "Do NOT put billing, card changes, payment failures, refunds, account login issues, "
+            "connection problems, or spam here — those belong in their own categories."
         ),
     },
     {
@@ -378,8 +383,8 @@ CRITICAL — classifications AND ticket_summaries must each have EXACTLY {ticket
 
         # Build a lookup of valid category IDs for validation
         valid_category_ids = {c["category_id"] for c in KNOWN_CATEGORIES}
-        # Fallback category for any ticket with an unrecognised / missing classification
-        FALLBACK_CATEGORY = "plan_feature_confusion"
+        # Fallback: Python-only bucket (NOT in the AI prompt, so AI can't dump into it)
+        FALLBACK_CATEGORY = "other_unclassified"
 
         result_text = ""
         try:
@@ -434,10 +439,11 @@ CRITICAL — classifications AND ticket_summaries must each have EXACTLY {ticket
                 for num in trend.get("ticket_numbers", []):
                     trend_ticket_numbers.add(str(num))
 
-            # Group by category_id
+            # Group by category_id (include fallback bucket for unclassified)
             category_tickets: Dict[str, List[int]] = {
                 c["category_id"]: [] for c in KNOWN_CATEGORIES
             }
+            category_tickets[FALLBACK_CATEGORY] = []
 
             input_numbers = {str(t["number"]) for t in tickets}
             classified = set()
@@ -526,6 +532,21 @@ CRITICAL — classifications AND ticket_summaries must each have EXACTLY {ticket
                     "ticket_numbers": nums,
                     "volume": len(nums),
                     "summary": category_summaries.get(cid, None),
+                })
+
+            # Append fallback bucket if it has any tickets
+            fallback_nums = list(dict.fromkeys(category_tickets[FALLBACK_CATEGORY]))
+            if fallback_nums:
+                logger.info(
+                    f"'{FALLBACK_CATEGORY}' bucket has {len(fallback_nums)} tickets "
+                    f"that the AI did not classify into any known category"
+                )
+                known_categories.append({
+                    "category_id": FALLBACK_CATEGORY,
+                    "title": "Other / Unclassified",
+                    "ticket_numbers": fallback_nums,
+                    "volume": len(fallback_nums),
+                    "summary": "Tickets that could not be automatically classified.",
                 })
 
             # Build final analysis object in the same shape the rest of the pipeline expects
