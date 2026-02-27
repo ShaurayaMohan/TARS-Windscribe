@@ -287,7 +287,7 @@ Only create a new trend if ALL of these are true:
   - At least 2 tickets share the EXACT SAME specific technical issue (same error, same region, same app version)
   - It cannot be reasonably force-fit into any known category
   - It is NOT a catch-all (forbidden titles: "Miscellaneous", "Other", "General", "Various", "Feedback", "Unrelated", "Unknown")
-On a normal day, new_trends will be EMPTY. That is the expected outcome.
+Most days will have 0-2 new trends. Zero is fine. So is two or three if the data supports it.
 SPAM, vendor emails, off-topic emails, and irrelevant submissions are NOT new trends — classify them
 into the closest known category (usually "plan_feature_confusion" or "lost_access_password_reset").
 

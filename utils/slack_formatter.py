@@ -337,40 +337,35 @@ class SlackFormatter:
     ) -> List[Dict]:
         """Build color-coded attachments for a single category's thread reply."""
         ticket_numbers = cat.get("ticket_numbers", [])
-        summary = cat.get("summary") or ""
 
-        # Header: category title + summary
+        # Header: just category title (summary already shown in main message)
         header_text = f"*{cat['title']}* — {cat['volume']} tickets"
-        if summary:
-            header_text += f"\n_{summary}_"
 
-        # Build a compact text block: one line per ticket
-        # Format: • #NUMBER: Subject — Description  [link]
+        # Build a compact text block: ticket number + summary
         display_numbers = ticket_numbers[:_THREAD_MAX_PER_CATEGORY]
         remainder = len(ticket_numbers) - len(display_numbers)
 
         ticket_lines = []
         for num in display_numbers:
             ticket_id = number_to_id.get(int(num))
-            subject = number_to_subject.get(int(num), "No Subject")
             detail = ticket_details.get(str(num), "")
+            subject = number_to_subject.get(int(num), "No Subject")
+            # Use AI summary if available, otherwise subject
+            desc = detail if detail else subject
 
             if ticket_id:
                 url = f"{self.base_url}/en/admin/ticket/view/{ticket_id}"
-                line = f"• <{url}|*#{num}*>: {subject}"
+                line = f"• <{url}|#{num}>: {desc}"
             else:
-                line = f"• *#{num}*: {subject}"
-
-            if detail and detail.lower() != subject.lower():
-                line += f"\n   _{detail}_"
+                line = f"• #{num}: {desc}"
 
             ticket_lines.append(line)
 
         if remainder > 0:
-            ticket_lines.append(f"\n_+{remainder} more tickets in this category_")
+            ticket_lines.append(f"_+{remainder} more tickets_")
 
         # Join into chunks of text that fit within Slack's 3000-char limit per block
-        full_text = header_text + "\n\n" + "\n".join(ticket_lines)
+        full_text = header_text + "\n" + "\n".join(ticket_lines)
 
         # Split into multiple text chunks if needed
         text_chunks = []
