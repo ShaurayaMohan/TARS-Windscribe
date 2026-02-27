@@ -83,7 +83,10 @@ KNOWN_CATEGORIES: List[Dict[str, str]] = [
             "User is blocked from a non-streaming service (banks, crypto exchanges, betting apps, "
             "ChatGPT, or local government portals). Tickets contain screenshots of Cloudflare 'Access "
             "Denied' pages or complaints that the website has detected VPN usage or flagged the IP "
-            "as high-risk."
+            "as high-risk. "
+            "NOT for cases where the Windscribe app or browser extension itself is causing technical "
+            "side-effects (audio failures, video black screens, WebRTC issues, crashes) — those are "
+            "new_trend candidates."
         ),
     },
     {
@@ -139,7 +142,10 @@ KNOWN_CATEGORIES: List[Dict[str, str]] = [
         "description": (
             "User bought a plan but is confused about what they see in the app. Tickets ask why they "
             "still see 'Free' servers with stars, why their custom plan doesn't have unlimited data, "
-            "or complain that a specific server they were looking for isn't listed."
+            "or complain that a specific server they were looking for isn't listed. "
+            "NOT a catch-all for tickets that don't fit elsewhere. App crashes, OS-specific bugs, "
+            "extension malfunctions, and unrecognised technical failures must never be placed here — "
+            "flag them as new_trend instead."
         ),
     },
     {
@@ -285,6 +291,17 @@ Only create a new trend if ALL of these are true:
 On a normal day, new_trends will be EMPTY. That is the expected outcome.
 SPAM, vendor emails, off-topic emails, and irrelevant submissions are NOT new trends — classify them
 into the closest known category (usually "plan_feature_confusion" or "lost_access_password_reset").
+
+A new trend is any recurring issue where >= 2 tickets share the same specific root cause AND that
+root cause is not already described by a known category. The PROBLEM TYPE itself matters — if no
+known category covers this KIND of problem, it is a new trend regardless of surface-level keyword
+similarity to another category.
+
+CORE PROBLEM TYPE TEST: Before assigning a ticket to a known category, ask:
+"Does the CORE problem described in this ticket match the typical problem in that category?"
+If a ticket describes an app crash → it is NOT a Plan & Feature Confusion ticket.
+If a ticket describes the Windscribe extension breaking video calls → it is NOT a Website/IP Ban ticket.
+When the core problem type doesn't match, use new_trend.
 
 === KNOWN CATEGORIES ===
 {categories_detail}
