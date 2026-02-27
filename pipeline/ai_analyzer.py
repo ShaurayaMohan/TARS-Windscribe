@@ -83,10 +83,7 @@ KNOWN_CATEGORIES: List[Dict[str, str]] = [
             "User is blocked from a non-streaming service (banks, crypto exchanges, betting apps, "
             "ChatGPT, or local government portals). Tickets contain screenshots of Cloudflare 'Access "
             "Denied' pages or complaints that the website has detected VPN usage or flagged the IP "
-            "as high-risk. "
-            "NOT for cases where the Windscribe app or browser extension itself is causing technical "
-            "side-effects (audio failures, video black screens, WebRTC issues, crashes) — those are "
-            "new_trend candidates."
+            "as high-risk."
         ),
     },
     {
@@ -272,7 +269,7 @@ class AIAnalyzer:
 
         prompt = f"""You are TARS, an AI assistant for the Windscribe VPN support operations team.
 
-=== YOUR TASK (two passes) ===
+=== YOUR TASK ===
 
 You will receive {ticket_count} support tickets. You must:
 
@@ -283,9 +280,9 @@ You will receive {ticket_count} support tickets. You must:
 === NEW TREND RULES ===
 Only create a new trend if ALL of these are true:
   - At least 2 tickets share the EXACT SAME specific technical issue (same error, same region, same app version)
-  - The problem type is NOT already described by any known category
+  - It cannot be reasonably force-fit into any known category
   - It is NOT a catch-all (forbidden titles: "Miscellaneous", "Other", "General", "Various", "Feedback", "Unrelated", "Unknown")
-Most days will have 0-2 new trends. Zero is fine. So is two or three if the data supports it.
+On a normal day, new_trends will be EMPTY. That is the expected outcome.
 SPAM, vendor emails, off-topic emails, and irrelevant submissions are NOT new trends — classify them
 into the closest known category (usually "plan_feature_confusion" or "lost_access_password_reset").
 
