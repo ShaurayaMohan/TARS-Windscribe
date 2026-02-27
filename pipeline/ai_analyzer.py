@@ -274,36 +274,20 @@ class AIAnalyzer:
 
 === YOUR TASK (two passes) ===
 
-You will receive {ticket_count} support tickets. Work in this order:
+You will receive {ticket_count} support tickets. You must:
 
-PASS 1 — NEW TREND SCAN:
-  Scan ALL tickets first. Look for groups of 2+ tickets that share the same
-  specific root cause which is NOT described by any of the known categories below.
-  If you find such a group, add them to new_trends.
-
-PASS 2 — CLASSIFY EVERY TICKET:
-  Assign EVERY ticket to exactly one known category — including tickets that
-  are also in a new trend (give them the closest known category).
-  Write a 1-2 sentence summary for each category that has tickets.
-
-IMPORTANT: The "classifications" dict must have an entry for ALL {ticket_count} tickets.
-No ticket may be skipped. Trend tickets still need a classification.
+1. Assign EVERY ticket to exactly one known category (see list below).
+2. If a ticket genuinely does not fit any known category, assign it to a new trend instead.
+3. Write a 1-2 sentence summary for each category that has tickets.
 
 === NEW TREND RULES ===
-A new trend is any recurring issue where >= 2 tickets share the same specific
-root cause AND that root cause is not already described by a known category.
-The PROBLEM TYPE itself matters — if no known category covers this KIND of
-problem, it is a new trend regardless of surface-level keyword similarity.
-
+Only create a new trend if ALL of these are true:
+  - At least 2 tickets share the EXACT SAME specific technical issue (same error, same region, same app version)
+  - The problem type is NOT already described by any known category
+  - It is NOT a catch-all (forbidden titles: "Miscellaneous", "Other", "General", "Various", "Feedback", "Unrelated", "Unknown")
 Most days will have 0-2 new trends. Zero is fine. So is two or three if the data supports it.
-
-Constraints:
-  - Minimum 2 tickets to form a trend
-  - NOT a catch-all (forbidden titles: "Miscellaneous", "Other", "General", "Various", "Feedback", "Unrelated", "Unknown")
-  - SPAM, vendor emails, off-topic emails are NOT trends — classify them into the closest known category
-
-A ticket only fits a known category if its core problem type genuinely matches
-that category's scope. When in doubt, prefer new_trend over forcing a bad fit.
+SPAM, vendor emails, off-topic emails, and irrelevant submissions are NOT new trends — classify them
+into the closest known category (usually "plan_feature_confusion" or "lost_access_password_reset").
 
 === KNOWN CATEGORIES ===
 {categories_detail}
