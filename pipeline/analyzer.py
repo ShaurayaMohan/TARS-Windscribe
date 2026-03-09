@@ -197,7 +197,7 @@ class TARSPipeline:
             ai_used = 0
             for t in tickets:
                 num = str(t["number"])
-                ai_summary = ai_summaries.get(num, "").strip().strip("'\"")
+                ai_summary = (ai_summaries.get(num) or "").strip().strip("'\"")
                 if ai_summary and not ai_summary.startswith("Issue Summary Chatlog"):
                     ticket_details[num] = ai_summary
                     ai_used += 1
