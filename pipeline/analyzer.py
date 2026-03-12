@@ -223,20 +223,82 @@ class TARSPipeline:
             if self.mongodb_storage:
                 try:
                     logger.info("Step 3/5: Saving analysis to MongoDB...")
-                    # Strip internal mappings (int keys) that MongoDB can't store,
-                    # and stringify any remaining int keys in ticket_details.
-                    save_copy = {
-                        k: v for k, v in analysis.items()
-                        if not k.startswith("_")
+                    from datetime import datetime
+                    from bson import ObjectId
+
+                    # -- Build v2 analysis summary document --
+                    categories_dict = {}
+                    for cat in analysis.get("known_categories", []):
+                        if cat.get("volume", 0) > 0:
+                            categories_dict[cat["category_id"]] = {
+                                "title": cat.get("title", cat["category_id"]),
+                                "count": cat["volume"],
+                                "summary": cat.get("summary") or "",
+                            }
+
+                    trend_docs = []
+                    for trend in analysis.get("new_trends", []):
+                        trend_docs.append({
+                            "title": trend.get("title", ""),
+                            "count": trend.get("volume", 0),
+                            "description": trend.get("description", ""),
+                            "geographic_pattern": trend.get("geographic_pattern"),
+                        })
+
+                    analysis_doc = {
+                        "run_date": datetime.utcnow(),
+                        "period_hours": hours,
+                        "brand_id": self.supportpal_brand_id,
+                        "total_tickets": len(tickets),
+                        "categories": categories_dict,
+                        "new_trends": trend_docs,
+                        "ai_usage": analysis.get("ai_usage"),
                     }
-                    # Ensure ticket_details keys are strings (AI sometimes uses ints)
-                    if "ticket_details" in save_copy:
-                        save_copy["ticket_details"] = {
-                            str(k): v
-                            for k, v in save_copy["ticket_details"].items()
-                        }
-                    self.mongodb_storage.save_analysis(save_copy)
-                    logger.info("Analysis saved to database")
+
+                    analysis_id_str = self.mongodb_storage.save_analysis(analysis_doc)
+                    analysis_oid = ObjectId(analysis_id_str)
+
+                    # -- Build reverse map: ticket_number → (category_id, trend info) --
+                    ticket_to_category: Dict[str, str] = {}
+                    for cat in analysis.get("known_categories", []):
+                        for num in cat.get("ticket_numbers", []):
+                            ticket_to_category[str(num)] = cat["category_id"]
+
+                    ticket_to_trend: Dict[str, str] = {}
+                    for trend in analysis.get("new_trends", []):
+                        for num in trend.get("ticket_numbers", []):
+                            ticket_to_trend[str(num)] = trend.get("title", "")
+
+                    # -- Build individual ticket documents --
+                    ticket_docs = []
+                    for t in tickets:
+                        num = str(t["number"])
+                        is_trend = num in ticket_to_trend
+                        msg = t.get("first_message", "")
+                        msg = _clean_chatlog_prefix(msg)
+
+                        ticket_docs.append({
+                            "analysis_id": analysis_oid,
+                            "ticket_number": int(t["number"]),
+                            "supportpal_id": int(t["id"]),
+                            "subject": t.get("subject", ""),
+                            "message_snippet": msg[:300],
+                            "ai_summary": ticket_details.get(num, ""),
+                            "category_id": ticket_to_category.get(num)
+                            if not is_trend
+                            else None,
+                            "is_new_trend": is_trend,
+                            "trend_title": ticket_to_trend.get(num),
+                            "status": t.get("status", "Unknown"),
+                            "priority": t.get("priority", "Unknown"),
+                            "brand_id": self.supportpal_brand_id,
+                            "supportpal_created_at": t.get("created_at"),
+                        })
+
+                    saved = self.mongodb_storage.save_tickets(ticket_docs)
+                    logger.info(
+                        f"Saved to MongoDB: 1 analysis + {saved} tickets"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to save to MongoDB: {e}")
                     # Non-fatal — continue to Slack

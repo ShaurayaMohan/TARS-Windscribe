@@ -204,9 +204,8 @@ def get_trends():
                 'period_days': 30,
                 'total_analyses': 0,
                 'total_tickets': 0,
-                'total_clusters': 0,
+                'total_categories': 0,
                 'avg_tickets_per_analysis': 0,
-                'avg_clusters_per_analysis': 0,
                 'daily_breakdown': {},
                 'top_recurring_issues': [],
                 'warning': 'MongoDB not configured'
@@ -242,6 +241,32 @@ def get_stats():
 
     except Exception as e:
         logger.error(f"Error fetching stats: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tickets', methods=['GET'])
+def get_tickets():
+    """Get tickets, optionally filtered by analysis_id or category_id."""
+    try:
+        storage = get_mongodb_storage()
+        if not storage:
+            return jsonify({'count': 0, 'tickets': [], 'warning': 'MongoDB not configured'}), 200
+
+        analysis_id = request.args.get('analysis_id')
+        category_id = request.args.get('category_id')
+        days = request.args.get('days', default=30, type=int)
+
+        if analysis_id:
+            tickets = storage.get_tickets_by_analysis(analysis_id)
+        elif category_id:
+            tickets = storage.get_tickets_by_category(category_id, days=days)
+        else:
+            return jsonify({'error': 'Provide analysis_id or category_id query parameter'}), 400
+
+        return jsonify({'count': len(tickets), 'tickets': tickets}), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching tickets: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

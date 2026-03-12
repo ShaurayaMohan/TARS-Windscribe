@@ -1,321 +1,319 @@
 """
-MongoDB storage client for TARS
-Stores and retrieves historical analysis data
+MongoDB storage client for TARS (v2 schema).
+
+Collections:
+  analyses  – one document per pipeline run (summary + category breakdown)
+  tickets   – one document per ticket (raw data + AI classification)
+  config    – application settings (prompt templates, etc.)
 """
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
-from pymongo import MongoClient, DESCENDING
+
+from bson import ObjectId
+from pymongo import MongoClient, DESCENDING, ASCENDING
 from pymongo.errors import ConnectionFailure, OperationFailure
 
 logger = logging.getLogger(__name__)
 
+_SCHEMA_VERSION = "2.0"
+
 
 class MongoDBStorage:
-    """MongoDB storage for TARS analysis results"""
-    
+    """MongoDB storage for TARS analysis results (v2 schema)."""
+
     def __init__(self, connection_string: str, database_name: str = "tars"):
-        """
-        Initialize MongoDB connection
-        
-        Args:
-            connection_string: MongoDB connection URI
-            database_name: Database name (default: "tars")
-        """
         try:
             self.client = MongoClient(connection_string, serverSelectionTimeoutMS=5000)
-            # Test connection
-            self.client.admin.command('ping')
-            logger.info("✅ MongoDB connection successful")
-            
+            self.client.admin.command("ping")
+            logger.info("MongoDB connection successful")
+
             self.db = self.client[database_name]
-            self.analyses_collection = self.db['analyses']
-            self.config_collection = self.db['config']
-            
-            # Create indexes for better query performance
-            self.analyses_collection.create_index([("analysis_date", DESCENDING)])
-            self.analyses_collection.create_index([("created_at", DESCENDING)])
-            
+
+            self._migrate_v1_if_needed()
+
+            self.analyses = self.db["analyses"]
+            self.tickets = self.db["tickets"]
+            self.config_collection = self.db["config"]
+
+            self._ensure_indexes()
+
         except ConnectionFailure as e:
-            logger.error(f"❌ MongoDB connection failed: {e}")
+            logger.error(f"MongoDB connection failed: {e}")
             raise
         except Exception as e:
-            logger.error(f"❌ MongoDB initialization error: {e}")
+            logger.error(f"MongoDB initialization error: {e}")
             raise
-    
-    def save_analysis(self, analysis_results: Dict) -> str:
-        """
-        Save analysis results to MongoDB
-        
-        Args:
-            analysis_results: Analysis data from TARSAnalyzer
-            
-        Returns:
-            Inserted document ID as string
-        """
+
+    # ── One-time migration ──────────────────────────────────────────────────
+
+    def _migrate_v1_if_needed(self):
+        """Rename the old v1 analyses collection if it still exists."""
+        existing = self.db.list_collection_names()
+        if "analyses" in existing and "analyses_v1_archived" not in existing:
+            old = self.db["analyses"]
+            sample = old.find_one()
+            if sample and "version" in sample and sample.get("version") == "1.0":
+                old.rename("analyses_v1_archived")
+                logger.info(
+                    "Migrated old v1 'analyses' collection → 'analyses_v1_archived'"
+                )
+
+    # ── Indexes ─────────────────────────────────────────────────────────────
+
+    def _ensure_indexes(self):
+        self.analyses.create_index([("run_date", DESCENDING)])
+
+        self.tickets.create_index([("analysis_id", ASCENDING)])
+        self.tickets.create_index([("category_id", ASCENDING)])
+        self.tickets.create_index([("ticket_number", ASCENDING)])
+        self.tickets.create_index([("created_at", DESCENDING)])
+        self.tickets.create_index([("is_new_trend", ASCENDING)])
+
+    # ── Write ───────────────────────────────────────────────────────────────
+
+    def save_analysis(self, analysis_doc: Dict) -> str:
+        """Insert an analysis summary document. Returns inserted _id as str."""
         try:
-            # Add metadata
-            document = {
-                **analysis_results,
-                "created_at": datetime.utcnow(),
-                "version": "1.0"
-            }
-            
-            result = self.analyses_collection.insert_one(document)
-            logger.info(f"✅ Analysis saved to MongoDB: {result.inserted_id}")
+            analysis_doc.setdefault("run_date", datetime.utcnow())
+            analysis_doc["schema_version"] = _SCHEMA_VERSION
+            result = self.analyses.insert_one(analysis_doc)
+            logger.info(f"Analysis saved: {result.inserted_id}")
             return str(result.inserted_id)
-            
         except OperationFailure as e:
-            logger.error(f"❌ Failed to save analysis: {e}")
+            logger.error(f"Failed to save analysis: {e}")
             raise
-    
-    def get_recent_analyses(self, limit: int = 30) -> List[Dict]:
-        """
-        Get most recent analyses
-        
-        Args:
-            limit: Number of analyses to retrieve (default: 30)
-            
-        Returns:
-            List of analysis documents
-        """
+
+    def save_tickets(self, ticket_docs: List[Dict]) -> int:
+        """Bulk-insert ticket documents. Returns count inserted."""
+        if not ticket_docs:
+            return 0
         try:
-            analyses = list(
-                self.analyses_collection
-                .find()
-                .sort("created_at", DESCENDING)
+            now = datetime.utcnow()
+            for doc in ticket_docs:
+                doc.setdefault("created_at", now)
+            result = self.tickets.insert_many(ticket_docs, ordered=False)
+            count = len(result.inserted_ids)
+            logger.info(f"{count} tickets saved")
+            return count
+        except OperationFailure as e:
+            logger.error(f"Failed to save tickets: {e}")
+            raise
+
+    # ── Read: analyses ──────────────────────────────────────────────────────
+
+    def get_recent_analyses(self, limit: int = 30) -> List[Dict]:
+        try:
+            docs = list(
+                self.analyses.find()
+                .sort("run_date", DESCENDING)
                 .limit(limit)
             )
-            
-            # Convert ObjectId to string for JSON serialization
-            for analysis in analyses:
-                analysis['_id'] = str(analysis['_id'])
-                
-            logger.info(f"Retrieved {len(analyses)} analyses from MongoDB")
-            return analyses
-            
+            for d in docs:
+                d["_id"] = str(d["_id"])
+            return docs
         except Exception as e:
             logger.error(f"Error retrieving analyses: {e}")
             return []
-    
+
     def get_analysis_by_id(self, analysis_id: str) -> Optional[Dict]:
-        """
-        Get specific analysis by ID
-        
-        Args:
-            analysis_id: MongoDB document ID
-            
-        Returns:
-            Analysis document or None
-        """
         try:
-            from bson import ObjectId
-            analysis = self.analyses_collection.find_one({"_id": ObjectId(analysis_id)})
-            
-            if analysis:
-                analysis['_id'] = str(analysis['_id'])
-                
-            return analysis
-            
+            doc = self.analyses.find_one({"_id": ObjectId(analysis_id)})
+            if doc:
+                doc["_id"] = str(doc["_id"])
+            return doc
         except Exception as e:
             logger.error(f"Error retrieving analysis {analysis_id}: {e}")
             return None
-    
-    def get_analyses_by_date_range(self, start_date: datetime, end_date: datetime) -> List[Dict]:
-        """
-        Get analyses within date range
-        
-        Args:
-            start_date: Start date (inclusive)
-            end_date: End date (inclusive)
-            
-        Returns:
-            List of analysis documents
-        """
+
+    # ── Read: tickets ───────────────────────────────────────────────────────
+
+    def get_tickets_by_analysis(self, analysis_id: str) -> List[Dict]:
         try:
-            analyses = list(
-                self.analyses_collection
-                .find({
-                    "created_at": {
-                        "$gte": start_date,
-                        "$lte": end_date
-                    }
-                })
-                .sort("created_at", DESCENDING)
+            docs = list(
+                self.tickets.find({"analysis_id": ObjectId(analysis_id)})
+                .sort("ticket_number", ASCENDING)
             )
-            
-            for analysis in analyses:
-                analysis['_id'] = str(analysis['_id'])
-                
-            logger.info(f"Retrieved {len(analyses)} analyses from {start_date} to {end_date}")
-            return analyses
-            
+            for d in docs:
+                d["_id"] = str(d["_id"])
+                d["analysis_id"] = str(d["analysis_id"])
+            return docs
         except Exception as e:
-            logger.error(f"Error retrieving analyses by date range: {e}")
+            logger.error(f"Error retrieving tickets for analysis {analysis_id}: {e}")
             return []
-    
-    def get_trend_data(self, days: int = 30) -> Dict:
-        """
-        Get aggregated trend data for charts
-        
-        Args:
-            days: Number of days to look back (default: 30)
-            
-        Returns:
-            Dictionary with trend statistics
-        """
+
+    def get_tickets_by_category(
+        self, category_id: str, days: int = 30, limit: int = 200
+    ) -> List[Dict]:
         try:
-            start_date = datetime.utcnow() - timedelta(days=days)
-            
-            analyses = list(
-                self.analyses_collection
-                .find({
-                    "created_at": {"$gte": start_date}
+            since = datetime.utcnow() - timedelta(days=days)
+            docs = list(
+                self.tickets.find({
+                    "category_id": category_id,
+                    "created_at": {"$gte": since},
                 })
                 .sort("created_at", DESCENDING)
+                .limit(limit)
             )
-            
-            # Calculate trends
-            total_analyses = len(analyses)
-            total_tickets = sum(a.get('total_tickets_analyzed', 0) for a in analyses)
-            total_clusters = sum(len(a.get('clusters', [])) for a in analyses)
-            
-            # Daily breakdown
-            daily_data = {}
-            for analysis in analyses:
-                date_key = analysis['created_at'].strftime('%Y-%m-%d')
-                if date_key not in daily_data:
-                    daily_data[date_key] = {
-                        'tickets': 0,
-                        'clusters': 0,
-                        'analyses': 0
-                    }
-                daily_data[date_key]['tickets'] += analysis.get('total_tickets_analyzed', 0)
-                daily_data[date_key]['clusters'] += len(analysis.get('clusters', []))
-                daily_data[date_key]['analyses'] += 1
-            
-            # Top recurring issues
-            cluster_frequency = {}
-            for analysis in analyses:
-                for cluster in analysis.get('clusters', []):
-                    title = cluster.get('title', 'Unknown')
-                    cluster_frequency[title] = cluster_frequency.get(title, 0) + 1
-            
-            top_issues = sorted(
-                [{'title': k, 'count': v} for k, v in cluster_frequency.items()],
-                key=lambda x: x['count'],
-                reverse=True
-            )[:10]
-            
-            return {
-                'period_days': days,
-                'total_analyses': total_analyses,
-                'total_tickets': total_tickets,
-                'total_clusters': total_clusters,
-                'avg_tickets_per_analysis': round(total_tickets / total_analyses, 2) if total_analyses > 0 else 0,
-                'avg_clusters_per_analysis': round(total_clusters / total_analyses, 2) if total_analyses > 0 else 0,
-                'daily_breakdown': daily_data,
-                'top_recurring_issues': top_issues
-            }
-            
+            for d in docs:
+                d["_id"] = str(d["_id"])
+                d["analysis_id"] = str(d["analysis_id"])
+            return docs
         except Exception as e:
-            logger.error(f"Error calculating trend data: {e}")
-            return {}
-    
+            logger.error(f"Error retrieving tickets for category {category_id}: {e}")
+            return []
+
+    # ── Dashboard stats ─────────────────────────────────────────────────────
+
     def get_dashboard_stats(self) -> Dict:
-        """
-        Get summary statistics for dashboard
-        
-        Returns:
-            Dictionary with dashboard stats
-        """
         try:
-            # Latest analysis
-            latest = self.analyses_collection.find_one(sort=[("created_at", DESCENDING)])
-            
-            # Today's analyses
-            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-            today_count = self.analyses_collection.count_documents({
-                "created_at": {"$gte": today_start}
-            })
-            
-            # Total analyses
-            total_analyses = self.analyses_collection.count_documents({})
-            
-            # Last 7 days ticket count
+            latest = self.analyses.find_one(sort=[("run_date", DESCENDING)])
+
+            today_start = datetime.utcnow().replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            today_count = self.analyses.count_documents(
+                {"run_date": {"$gte": today_start}}
+            )
+            total_analyses = self.analyses.count_documents({})
+
             week_ago = datetime.utcnow() - timedelta(days=7)
-            week_analyses = list(self.analyses_collection.find({
-                "created_at": {"$gte": week_ago}
-            }))
-            week_tickets = sum(a.get('total_tickets_analyzed', 0) for a in week_analyses)
-            
-            # Extract top cluster info from the latest analysis
-            top_cluster = None
+            pipeline = [
+                {"$match": {"created_at": {"$gte": week_ago}}},
+                {"$group": {"_id": None, "total": {"$sum": 1}}},
+            ]
+            agg = list(self.tickets.aggregate(pipeline))
+            week_tickets = agg[0]["total"] if agg else 0
+
+            top_category = None
             if latest:
-                clusters = latest.get('clusters', [])
-                if clusters:
-                    top_cluster = {
-                        'title': clusters[0].get('title'),
-                        'geographic_pattern': clusters[0].get('geographic_pattern'),
+                cats = latest.get("categories", {})
+                if cats:
+                    top_id = max(cats, key=lambda k: cats[k].get("count", 0))
+                    top_cat = cats[top_id]
+                    top_category = {
+                        "category_id": top_id,
+                        "title": top_cat.get("title", top_id),
+                        "count": top_cat.get("count", 0),
                     }
 
             return {
-                'latest_analysis': {
-                    'date': latest['created_at'].isoformat() if latest and latest.get('created_at') else latest.get('analysis_date') if latest else None,
-                    'tickets': latest.get('total_tickets_analyzed', 0) if latest else 0,
-                    'clusters': len(latest.get('clusters', [])) if latest else 0,
-                    'top_cluster': top_cluster,
-                } if latest else None,
-                'today_analyses': today_count,
-                'total_analyses': total_analyses,
-                'last_7_days_tickets': week_tickets
+                "latest_analysis": {
+                    "date": latest["run_date"].isoformat()
+                    if latest and latest.get("run_date")
+                    else None,
+                    "tickets": latest.get("total_tickets", 0) if latest else 0,
+                    "categories": len(latest.get("categories", {}))
+                    if latest
+                    else 0,
+                    "top_category": top_category,
+                }
+                if latest
+                else None,
+                "today_analyses": today_count,
+                "total_analyses": total_analyses,
+                "last_7_days_tickets": week_tickets,
             }
-            
         except Exception as e:
             logger.error(f"Error getting dashboard stats: {e}")
             return {}
-    
-    def get_prompt_template(self) -> Optional[str]:
-        """
-        Get the stored AI prompt template from MongoDB.
 
-        Returns:
-            Template string with {{TICKET_COUNT}}, {{ALL_TICKET_IDS}},
-            {{TICKETS_FORMATTED}} placeholders, or None if not yet saved.
-        """
+    # ── Trend data for charts ───────────────────────────────────────────────
+
+    def get_trend_data(self, days: int = 30) -> Dict:
+        try:
+            since = datetime.utcnow() - timedelta(days=days)
+
+            analyses = list(
+                self.analyses.find({"run_date": {"$gte": since}})
+                .sort("run_date", DESCENDING)
+            )
+
+            total_analyses = len(analyses)
+            total_tickets = sum(a.get("total_tickets", 0) for a in analyses)
+            total_categories = sum(
+                len(a.get("categories", {})) for a in analyses
+            )
+
+            daily_data: Dict[str, Dict] = {}
+            for a in analyses:
+                date_key = a["run_date"].strftime("%Y-%m-%d")
+                if date_key not in daily_data:
+                    daily_data[date_key] = {
+                        "tickets": 0,
+                        "categories": 0,
+                        "analyses": 0,
+                    }
+                daily_data[date_key]["tickets"] += a.get("total_tickets", 0)
+                daily_data[date_key]["categories"] += len(
+                    a.get("categories", {})
+                )
+                daily_data[date_key]["analyses"] += 1
+
+            cat_frequency: Dict[str, int] = {}
+            for a in analyses:
+                for cat_id, cat_data in a.get("categories", {}).items():
+                    title = cat_data.get("title", cat_id)
+                    cat_frequency[title] = (
+                        cat_frequency.get(title, 0)
+                        + cat_data.get("count", 0)
+                    )
+
+            top_issues = sorted(
+                [{"title": k, "count": v} for k, v in cat_frequency.items()],
+                key=lambda x: x["count"],
+                reverse=True,
+            )[:10]
+
+            return {
+                "period_days": days,
+                "total_analyses": total_analyses,
+                "total_tickets": total_tickets,
+                "total_categories": total_categories,
+                "avg_tickets_per_analysis": round(
+                    total_tickets / total_analyses, 2
+                )
+                if total_analyses > 0
+                else 0,
+                "daily_breakdown": daily_data,
+                "top_recurring_issues": top_issues,
+            }
+        except Exception as e:
+            logger.error(f"Error calculating trend data: {e}")
+            return {}
+
+    # ── Config (prompt templates) ───────────────────────────────────────────
+
+    def get_prompt_template(self) -> Optional[str]:
         try:
             doc = self.config_collection.find_one({"key": "prompt_template"})
-            if doc:
-                return doc.get("value")
-            return None
+            return doc.get("value") if doc else None
         except Exception as e:
             logger.error(f"Error reading prompt template: {e}")
             return None
 
     def save_prompt_template(self, text: str) -> bool:
-        """
-        Save (upsert) the AI prompt template to MongoDB.
-
-        Args:
-            text: Prompt template string with named placeholders.
-
-        Returns:
-            True on success, False on failure.
-        """
         try:
             self.config_collection.update_one(
                 {"key": "prompt_template"},
-                {"$set": {"key": "prompt_template", "value": text, "updated_at": datetime.utcnow()}},
+                {
+                    "$set": {
+                        "key": "prompt_template",
+                        "value": text,
+                        "updated_at": datetime.utcnow(),
+                    }
+                },
                 upsert=True,
             )
-            logger.info("✅ Prompt template saved to MongoDB")
+            logger.info("Prompt template saved")
             return True
         except Exception as e:
             logger.error(f"Error saving prompt template: {e}")
             return False
 
+    # ── Cleanup ─────────────────────────────────────────────────────────────
+
     def close(self):
-        """Close MongoDB connection"""
         if self.client:
             self.client.close()
             logger.info("MongoDB connection closed")

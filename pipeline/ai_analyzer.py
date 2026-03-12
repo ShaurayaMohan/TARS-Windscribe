@@ -556,9 +556,14 @@ CRITICAL — classifications AND ticket_summaries must each have EXACTLY {ticket
                 "total_tickets_analyzed": len(tickets),
                 "known_categories": known_categories,
                 "new_trends": new_trends,
-                # Raw per-ticket summaries — keyed by ticket number as string
-                # Used by pipeline/analyzer.py to build ticket_details
                 "ticket_summaries": {str(k): v for k, v in ticket_summaries.items()},
+                "ai_usage": {
+                    "model": self.model,
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                    "total_tokens": usage.total_tokens,
+                    "finish_reason": finish_reason,
+                },
             }
 
             # ── Summary logging ───────────────────────────────────────────
