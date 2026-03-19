@@ -7,6 +7,7 @@ Two-phase approach:
 """
 import json
 import logging
+from datetime import datetime
 from typing import List, Dict, Optional
 
 from openai import OpenAI
@@ -318,7 +319,6 @@ The "classifications" object is the most important part. It MUST contain one ent
 ticket number. The key is the ticket number as a string, the value is the category_id.
 
 {{
-  "analysis_date": "YYYY-MM-DD",
   "category_summaries": {{
     "category_id": "specific 1-2 sentence summary describing THIS batch (not the category definition)",
     ... only for categories that have at least 1 ticket ...
@@ -552,7 +552,7 @@ CRITICAL — classifications AND ticket_summaries must each have EXACTLY {ticket
 
             # Build final analysis object in the same shape the rest of the pipeline expects
             analysis = {
-                "analysis_date": raw.get("analysis_date", ""),
+                "analysis_date": datetime.utcnow().strftime("%Y-%m-%d"),
                 "total_tickets_analyzed": len(tickets),
                 "known_categories": known_categories,
                 "new_trends": new_trends,

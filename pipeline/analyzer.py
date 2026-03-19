@@ -132,7 +132,10 @@ class TARSPipeline:
 
             if not tickets:
                 logger.warning(f"No tickets found in the last {hours} hours")
-                self.slack_formatter.post_no_tickets_message(hours)
+                try:
+                    self.slack_formatter.post_no_tickets_message(hours)
+                except Exception as slack_err:
+                    logger.warning(f"Slack posting failed (non-fatal): {slack_err}")
                 return True  # Not an error
 
             logger.info(f"Fetched {len(tickets)} tickets for analysis")
@@ -183,7 +186,10 @@ class TARSPipeline:
 
             if not analysis:
                 logger.error("AI analysis failed")
-                self.slack_formatter.post_error_message("AI analysis failed — check logs.")
+                try:
+                    self.slack_formatter.post_error_message("AI analysis failed — check logs.")
+                except Exception:
+                    pass
                 return False
 
             # Attach mapping so the formatter can build links without re-fetching
@@ -305,11 +311,12 @@ class TARSPipeline:
 
             # ── Step 4 + 5: Post to Slack ──────────────────────────────────────
             logger.info("Step 4/5: Posting to Slack...")
-            success = self.slack_formatter.post_analysis(analysis)
-
-            if not success:
-                logger.error("Failed to post to Slack")
-                return False
+            try:
+                slack_ok = self.slack_formatter.post_analysis(analysis)
+                if not slack_ok:
+                    logger.warning("Slack post returned failure — analysis data was still saved")
+            except Exception as slack_err:
+                logger.warning(f"Slack posting failed (non-fatal): {slack_err}")
 
             logger.info("TARS analysis pipeline completed successfully")
             return True

@@ -30,35 +30,41 @@ function App() {
   }, [showSplash]);
 
   return (
-    <div style={{ position: 'relative', minHeight: '100vh', background: '#0A1929' }}>
-      {/* FaultyTerminal Background — always visible */}
-      <FaultyTerminal
-        scale={1.5}
-        gridMul={[2, 1]}
-        digitSize={1.2}
-        timeScale={0.5}
-        pause={false}
-        scanlineIntensity={0.5}
-        glitchAmount={1}
-        flickerAmount={1}
-        noiseAmp={1}
-        chromaticAberration={0}
-        dither={0}
-        curvature={0.1}
-        tint="#47f8c7"
-        mouseReact
-        mouseStrength={0.5}
-        pageLoadAnimation
-        brightness={0.6}
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          zIndex: 0,
-        }}
-      />
+    <div style={{
+      position: 'relative',
+      minHeight: '100vh',
+      background: 'radial-gradient(ellipse at 20% 0%, rgba(71,248,199,0.08) 0%, transparent 50%), radial-gradient(ellipse at 80% 100%, rgba(71,130,248,0.06) 0%, transparent 50%), #0A1929',
+    }}>
+      {/* FaultyTerminal Background — only during splash */}
+      {showSplash && (
+        <FaultyTerminal
+          scale={1.5}
+          gridMul={[2, 1]}
+          digitSize={1.2}
+          timeScale={0.5}
+          pause={false}
+          scanlineIntensity={0.5}
+          glitchAmount={1}
+          flickerAmount={1}
+          noiseAmp={1}
+          chromaticAberration={0}
+          dither={0}
+          curvature={0.1}
+          tint="#47f8c7"
+          mouseReact
+          mouseStrength={0.5}
+          pageLoadAnimation
+          brightness={0.6}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            zIndex: 0,
+          }}
+        />
+      )}
 
       {/* ── Splash Screen ── */}
       {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
