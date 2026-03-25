@@ -128,10 +128,10 @@ class TARSScheduler:
                 replace_existing=True
             )
 
-            # Add weekly sentiment report — Mondays at 10 AM UTC
+            # Add weekly sentiment report — Tuesdays at 10 AM UTC
             self.scheduler.add_job(
                 self.run_weekly_sentiment_report,
-                trigger=CronTrigger(day_of_week="mon", hour=10, minute=0),
+                trigger=CronTrigger(day_of_week="tue", hour=10, minute=0),
                 id="tars_weekly_sentiment",
                 name="TARS Weekly Sentiment Report",
                 replace_existing=True,
