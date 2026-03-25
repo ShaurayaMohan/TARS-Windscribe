@@ -113,6 +113,21 @@ export interface TriggerAnalysisResponse {
   message: string;
 }
 
+export interface SentimentResponse {
+  period_days: number;
+  total_scored: number;
+  sentiment: Record<string, number>;
+  urgency: Record<string, number>;
+  churn_risk: Record<string, number>;
+  high_churn_tickets: Array<{
+    ticket_number: number;
+    subject: string;
+    sentiment_summary: string;
+    sentiment: string;
+    urgency: string;
+  }>;
+}
+
 // ─── Base ─────────────────────────────────────────────────────────────────────
 
 const BASE = '';  // Vite proxy forwards /api/* → http://localhost:5001
@@ -185,6 +200,12 @@ export function fetchPrompt(): Promise<{ prompt: string; source?: string }> {
 /** POST /api/prompt — Save a custom prompt template */
 export function savePrompt(text: string): Promise<{ status: string }> {
   return post<{ status: string }>('/api/prompt', { prompt: text });
+}
+
+/** GET /api/sentiment?days=N — Aggregated sentiment stats */
+export async function fetchSentiment(days = 7): Promise<SentimentResponse> {
+  const raw = await get<SentimentResponse | SentimentResponse[]>(`/api/sentiment?days=${days}`);
+  return unwrapArray(raw);
 }
 
 /** POST /analyze — Manually trigger a new analysis run */

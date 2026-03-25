@@ -16,6 +16,7 @@ from typing import Dict, Optional
 
 from pipeline.supportpal_client import SupportPalClient
 from pipeline.ai_analyzer import AIAnalyzer
+from pipeline.sentiment_analyzer import SentimentAnalyzer
 from utils.slack_formatter import SlackFormatter
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,7 @@ class TARSPipeline:
         else:
             logger.info(f"Brand filter active: only fetching brand_id={supportpal_brand_id} tickets")
         self.ai_analyzer = AIAnalyzer(openai_api_key)
+        self.sentiment_analyzer = SentimentAnalyzer(openai_api_key)
 
         # Extract base URL for SupportPal ticket links
         base_url = supportpal_api_url.replace("/api", "")
@@ -225,6 +227,16 @@ class TARSPipeline:
                 f"{num_trends} new trends"
             )
 
+            # ── Step 2.5: Sentiment analysis ─────────────────────────────────
+            logger.info("Step 2.5/5: Running sentiment analysis...")
+            sentiment_results = self.sentiment_analyzer.analyze(tickets)
+            if sentiment_results:
+                logger.info(
+                    f"Sentiment scored {len(sentiment_results)} tickets"
+                )
+            else:
+                logger.warning("Sentiment analysis returned no results — continuing without it")
+
             # ── Step 3: Save to MongoDB (BEFORE Slack) ─────────────────────────
             if self.mongodb_storage:
                 try:
@@ -283,6 +295,7 @@ class TARSPipeline:
                         msg = t.get("first_message", "")
                         msg = _clean_chatlog_prefix(msg)
 
+                        sent = sentiment_results.get(num, {})
                         ticket_docs.append({
                             "analysis_id": analysis_oid,
                             "ticket_number": int(t["number"]),
@@ -299,6 +312,10 @@ class TARSPipeline:
                             "priority": t.get("priority", "Unknown"),
                             "brand_id": self.supportpal_brand_id,
                             "supportpal_created_at": t.get("created_at"),
+                            "sentiment": sent.get("sentiment"),
+                            "urgency": sent.get("urgency"),
+                            "churn_risk": sent.get("churn_risk"),
+                            "sentiment_summary": sent.get("summary"),
                         })
 
                     saved = self.mongodb_storage.save_tickets(ticket_docs)

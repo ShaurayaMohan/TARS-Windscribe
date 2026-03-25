@@ -69,6 +69,9 @@ class MongoDBStorage:
         self.tickets.create_index([("ticket_number", ASCENDING)])
         self.tickets.create_index([("created_at", DESCENDING)])
         self.tickets.create_index([("is_new_trend", ASCENDING)])
+        self.tickets.create_index([("sentiment", ASCENDING)])
+        self.tickets.create_index([("churn_risk", ASCENDING)])
+        self.tickets.create_index([("urgency", ASCENDING)])
 
     # ── Write ───────────────────────────────────────────────────────────────
 
@@ -280,6 +283,74 @@ class MongoDBStorage:
             }
         except Exception as e:
             logger.error(f"Error calculating trend data: {e}")
+            return {}
+
+    # ── Sentiment helpers ──────────────────────────────────────────────────
+
+    def get_sentiment_stats(self, days: int = 7) -> Dict:
+        """Aggregate sentiment/urgency/churn across the last *days* days."""
+        try:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+
+            analysis_ids = [
+                a["_id"]
+                for a in self.analyses.find(
+                    {"run_date": {"$gte": cutoff}}, {"_id": 1}
+                )
+            ]
+            if not analysis_ids:
+                return {}
+
+            pipeline = [
+                {"$match": {"analysis_id": {"$in": analysis_ids}, "sentiment": {"$ne": None}}},
+                {
+                    "$facet": {
+                        "sentiment": [
+                            {"$group": {"_id": "$sentiment", "count": {"$sum": 1}}},
+                        ],
+                        "urgency": [
+                            {"$group": {"_id": "$urgency", "count": {"$sum": 1}}},
+                        ],
+                        "churn_risk": [
+                            {"$group": {"_id": "$churn_risk", "count": {"$sum": 1}}},
+                        ],
+                        "high_churn": [
+                            {"$match": {"churn_risk": "high"}},
+                            {
+                                "$project": {
+                                    "ticket_number": 1,
+                                    "subject": 1,
+                                    "sentiment_summary": 1,
+                                    "sentiment": 1,
+                                    "urgency": 1,
+                                }
+                            },
+                        ],
+                        "total": [{"$count": "n"}],
+                    }
+                },
+            ]
+
+            result = list(self.tickets.aggregate(pipeline))
+            if not result:
+                return {}
+
+            data = result[0]
+            total = data["total"][0]["n"] if data["total"] else 0
+
+            def _to_dict(bucket_list):
+                return {b["_id"]: b["count"] for b in bucket_list if b["_id"]}
+
+            return {
+                "period_days": days,
+                "total_scored": total,
+                "sentiment": _to_dict(data["sentiment"]),
+                "urgency": _to_dict(data["urgency"]),
+                "churn_risk": _to_dict(data["churn_risk"]),
+                "high_churn_tickets": data["high_churn"],
+            }
+        except Exception as e:
+            logger.error(f"Error aggregating sentiment data: {e}")
             return {}
 
     # ── Config (prompt templates) ───────────────────────────────────────────

@@ -270,6 +270,40 @@ def get_tickets():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/sentiment', methods=['GET'])
+def get_sentiment():
+    """Get aggregated sentiment stats for the dashboard."""
+    try:
+        storage = get_mongodb_storage()
+        if not storage:
+            return jsonify({
+                'period_days': 7,
+                'total_scored': 0,
+                'sentiment': {},
+                'urgency': {},
+                'churn_risk': {},
+                'high_churn_tickets': [],
+                'warning': 'MongoDB not configured',
+            }), 200
+
+        days = request.args.get('days', default=7, type=int)
+        stats = storage.get_sentiment_stats(days=days)
+        if not stats:
+            stats = {
+                'period_days': days,
+                'total_scored': 0,
+                'sentiment': {},
+                'urgency': {},
+                'churn_risk': {},
+                'high_churn_tickets': [],
+            }
+        return jsonify(stats), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching sentiment stats: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/prompt', methods=['GET'])
 def get_prompt():
     """Return the AI analysis prompt template.

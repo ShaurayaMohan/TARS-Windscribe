@@ -9,6 +9,7 @@ from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 from pipeline.analyzer import TARSPipeline
 from storage.mongodb_client import MongoDBStorage
+from utils.weekly_report import post_weekly_sentiment_report
 
 # Load environment variables
 load_dotenv()
@@ -66,6 +67,28 @@ class TARSScheduler:
                 
         except Exception as e:
             logger.error(f"Scheduled analysis error: {e}", exc_info=True)
+
+    def run_weekly_sentiment_report(self):
+        """Post the weekly sentiment report (called by scheduler on Mondays)."""
+        try:
+            logger.info("📊 Weekly sentiment report triggered")
+            self.init_storage()
+            if not self.mongodb_storage:
+                logger.error("MongoDB not available — cannot generate weekly report")
+                return
+
+            ok = post_weekly_sentiment_report(
+                mongodb_storage=self.mongodb_storage,
+                slack_bot_token=os.getenv("SLACK_BOT_TOKEN", ""),
+                slack_channel_id=os.getenv("SLACK_CHANNEL_ID", ""),
+                days=7,
+            )
+            if ok:
+                logger.info("✅ Weekly sentiment report posted")
+            else:
+                logger.warning("Weekly sentiment report had no data or failed")
+        except Exception as e:
+            logger.error(f"Weekly sentiment report error: {e}", exc_info=True)
     
     def start(self, cron_expression: str = "0 9 * * *"):
         """
@@ -96,7 +119,7 @@ class TARSScheduler:
                 day_of_week=day_of_week
             )
             
-            # Add job to scheduler
+            # Add daily analysis job
             self.scheduler.add_job(
                 self.run_scheduled_analysis,
                 trigger=trigger,
@@ -104,7 +127,16 @@ class TARSScheduler:
                 name='TARS Automated Analysis',
                 replace_existing=True
             )
-            
+
+            # Add weekly sentiment report — Mondays at 10 AM UTC
+            self.scheduler.add_job(
+                self.run_weekly_sentiment_report,
+                trigger=CronTrigger(day_of_week="mon", hour=10, minute=0),
+                id="tars_weekly_sentiment",
+                name="TARS Weekly Sentiment Report",
+                replace_existing=True,
+            )
+
             # Start scheduler
             self.scheduler.start()
             
