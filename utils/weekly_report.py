@@ -6,30 +6,36 @@ aggregates the data, and posts a formatted summary to Slack.
 """
 import logging
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 logger = logging.getLogger(__name__)
 
-# ── Color palette for sentiment blocks ────────────────────────────────────────
-SENTIMENT_COLORS = {
-    "positive": "#059669",
-    "neutral": "#6B7280",
-    "frustrated": "#D97706",
-    "angry": "#DC2626",
-}
-CHURN_COLOR = "#DC2626"
-URGENCY_COLOR = "#2563EB"
+
+def _pct(count: int, total: int) -> str:
+    return f"{count / total:.0%}" if total else "0%"
 
 
-def _bar(label: str, count: int, total: int, max_width: int = 12) -> str:
-    """Tiny text bar chart: ████░░░░ 42%"""
+def _bar(count: int, total: int, width: int = 10) -> str:
     pct = count / total if total else 0
-    filled = round(pct * max_width)
-    empty = max_width - filled
-    return f"{label:<12} {'█' * filled}{'░' * empty}  {count}  ({pct:.0%})"
+    filled = round(pct * width)
+    return "█" * filled + "░" * (width - filled)
+
+
+def _build_breakdown(
+    buckets: Dict[str, int], total: int, order: List[str]
+) -> str:
+    """Build a compact breakdown with inline code bars."""
+    lines = []
+    for key in order:
+        count = buckets.get(key, 0)
+        if count == 0:
+            continue
+        bar = _bar(count, total)
+        lines.append(f"`{bar}` *{key.capitalize()}* — {count}  ({_pct(count, total)})")
+    return "\n".join(lines)
 
 
 def post_weekly_sentiment_report(
@@ -51,103 +57,102 @@ def post_weekly_sentiment_report(
     churn = stats.get("churn_risk", {})
     high_churn_tickets = stats.get("high_churn_tickets", [])
 
-    today = datetime.utcnow().strftime("%B %d, %Y")
+    blocks = _build_report(total, sentiment, urgency, churn, high_churn_tickets, days)
 
-    blocks = [
-        {
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": f"TARS Weekly Sentiment Report — {today}",
-            },
-        },
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": f"*{total}* tickets scored over the past *{days}* days.",
-            },
-        },
-        {"type": "divider"},
-    ]
-
-    # Sentiment breakdown
-    sentiment_lines = [
-        _bar(k.capitalize(), v, total)
-        for k, v in sorted(sentiment.items(), key=lambda x: -x[1])
-    ]
-    blocks.append({
-        "type": "section",
-        "text": {
-            "type": "mrkdwn",
-            "text": "*Sentiment Breakdown*\n```\n" + "\n".join(sentiment_lines) + "\n```",
-        },
-    })
-
-    # Urgency breakdown
-    urgency_order = ["critical", "high", "medium", "low"]
-    urgency_lines = [
-        _bar(u.capitalize(), urgency.get(u, 0), total)
-        for u in urgency_order
-        if urgency.get(u, 0) > 0
-    ]
-    if urgency_lines:
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*Urgency Breakdown*\n```\n" + "\n".join(urgency_lines) + "\n```",
-            },
-        })
-
-    # Churn risk
-    churn_order = ["high", "medium", "low"]
-    churn_lines = [
-        _bar(c.capitalize(), churn.get(c, 0), total)
-        for c in churn_order
-        if churn.get(c, 0) > 0
-    ]
-    if churn_lines:
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*Churn Risk*\n```\n" + "\n".join(churn_lines) + "\n```",
-            },
-        })
-
-    # High churn tickets spotlight
-    if high_churn_tickets:
-        blocks.append({"type": "divider"})
-        ticket_lines = []
-        for t in high_churn_tickets[:10]:
-            num = t.get("ticket_number", "?")
-            subj = t.get("subject", "")[:60]
-            summary = t.get("sentiment_summary", "")
-            sent = t.get("sentiment", "")
-            urg = t.get("urgency", "")
-            ticket_lines.append(
-                f"• *#{num}* — {subj}\n"
-                f"   _{summary}_  |  {sent} · {urg}"
-            )
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*High Churn Risk Tickets*\n" + "\n".join(ticket_lines),
-            },
-        })
-
-    # Post to Slack
     client = WebClient(token=slack_bot_token)
+    today = datetime.utcnow().strftime("%B %d, %Y")
     try:
         client.chat_postMessage(
             channel=slack_channel_id,
             text=f"TARS Weekly Sentiment Report — {today}",
             blocks=blocks,
+            unfurl_links=False,
+            unfurl_media=False,
         )
         logger.info("Weekly sentiment report posted to Slack")
         return True
     except SlackApiError as e:
         logger.error(f"Failed to post weekly sentiment report: {e.response['error']}")
         return False
+
+
+def _build_report(
+    total: int,
+    sentiment: Dict[str, int],
+    urgency: Dict[str, int],
+    churn: Dict[str, int],
+    high_churn_tickets: list,
+    days: int,
+) -> list:
+    """Build Slack blocks for the report."""
+    today = datetime.utcnow().strftime("%B %d, %Y")
+
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f"TARS Weekly Sentiment Report — {today}"},
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*{total}* tickets scored over the past *{days}* days."},
+        },
+        {"type": "divider"},
+    ]
+
+    # ── Sentiment ─────────────────────────────────────────────────────────
+    sentiment_order = sorted(sentiment.keys(), key=lambda k: sentiment.get(k, 0), reverse=True)
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "*Sentiment*\n" + _build_breakdown(sentiment, total, sentiment_order),
+        },
+    })
+
+    # ── Urgency ───────────────────────────────────────────────────────────
+    urgency_order = ["critical", "high", "medium", "low"]
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "*Urgency*\n" + _build_breakdown(urgency, total, urgency_order),
+        },
+    })
+
+    # ── Churn risk ────────────────────────────────────────────────────────
+    churn_order = ["high", "medium", "low"]
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "*Churn Risk*\n" + _build_breakdown(churn, total, churn_order),
+        },
+    })
+
+    # ── High churn spotlight ──────────────────────────────────────────────
+    if high_churn_tickets:
+        blocks.append({"type": "divider"})
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "*High Churn Risk Tickets*"},
+        })
+        for t in high_churn_tickets[:10]:
+            num = t.get("ticket_number", "?")
+            subj = t.get("subject", "")[:60]
+            summary = t.get("sentiment_summary", "")
+            sent = t.get("sentiment", "")
+            urg = t.get("urgency", "")
+
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"*#{num}* — {subj}\n"
+                        f"_{summary}_\n"
+                        f"`{sent}` · `{urg}`"
+                    ),
+                },
+            })
+
+    return blocks

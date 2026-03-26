@@ -227,8 +227,26 @@ class TARSPipeline:
                 f"{num_trends} new trends"
             )
 
-            # ── Step 2.5: Sentiment analysis ─────────────────────────────────
-            logger.info("Step 2.5/5: Running sentiment analysis...")
+            # ── Step 2.5a: Fetch full customer conversations for sentiment ──
+            logger.info("Step 2.5a/5: Fetching full customer conversations...")
+            for t in tickets:
+                try:
+                    msgs = self.supportpal_client.get_ticket_messages(int(t["id"]))
+                    customer_texts = []
+                    for m in msgs:
+                        if m.get("user_id"):
+                            customer_texts.append(_strip_html(m.get("text", "")))
+                    full_convo = "\n---\n".join(customer_texts)
+                    t["full_conversation"] = full_convo[:8000]
+                except Exception as e:
+                    logger.warning(f"Could not fetch messages for ticket #{t.get('number')}: {e}")
+                    t["full_conversation"] = t.get("first_message", "")[:8000]
+
+            convos_fetched = sum(1 for t in tickets if t.get("full_conversation"))
+            logger.info(f"Fetched full conversations for {convos_fetched}/{len(tickets)} tickets")
+
+            # ── Step 2.5b: Sentiment analysis ─────────────────────────────────
+            logger.info("Step 2.5b/5: Running sentiment analysis...")
             sentiment_results = self.sentiment_analyzer.analyze(tickets)
             if sentiment_results:
                 logger.info(

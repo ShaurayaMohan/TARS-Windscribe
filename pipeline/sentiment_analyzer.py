@@ -4,16 +4,33 @@ Sentiment analysis for TARS.
 Runs as a separate GPT-4o call after classification.  For each ticket it
 returns sentiment, urgency, churn risk, and a one-line summary.
 
+Tickets are processed in batches of BATCH_SIZE to stay within context limits
+when full customer conversation threads are included (~8k chars per ticket).
+
 The results are merged into the per-ticket MongoDB documents and aggregated
-into a weekly sentiment report every Monday.
+into a weekly sentiment report every Tuesday.
 """
 import json
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from openai import OpenAI
 
 logger = logging.getLogger(__name__)
+
+BATCH_SIZE = 20
+MAX_CONVO_CHARS = 8000
+
+VALID_SENTIMENTS = {"positive", "neutral", "frustrated", "angry"}
+VALID_URGENCIES = {"low", "medium", "high", "critical"}
+VALID_CHURN = {"low", "medium", "high"}
+
+SYSTEM_MSG = (
+    "You are TARS, an expert Customer Experience Analyst "
+    "for Windscribe VPN. You assess support ticket sentiment "
+    "with precision. You always return valid JSON exactly as "
+    "specified."
+)
 
 
 class SentimentAnalyzer:
@@ -25,88 +42,101 @@ class SentimentAnalyzer:
 
     def analyze(self, tickets: List[Dict]) -> Dict[str, Dict]:
         """
-        Analyze a batch of tickets for sentiment signals.
+        Analyze tickets for sentiment signals in batches.
 
         Args:
-            tickets: list of ticket dicts (must have 'number', 'subject',
-                     'first_message' keys — same shape as ai_analyzer input).
+            tickets: list of ticket dicts with 'number', 'subject', and
+                     either 'full_conversation' (preferred) or 'first_message'.
 
         Returns:
-            Dict keyed by ticket number (str) → {sentiment, urgency,
-            churn_risk, summary}.  Returns empty dict on failure.
+            Dict keyed by ticket number (str) -> {sentiment, urgency,
+            churn_risk, summary}.  Returns partial results if some batches fail.
         """
         if not tickets:
             return {}
 
-        prompt = self._build_prompt(tickets)
+        all_results: Dict[str, Dict] = {}
+        batches = [
+            tickets[i : i + BATCH_SIZE]
+            for i in range(0, len(tickets), BATCH_SIZE)
+        ]
+        total_batches = len(batches)
+        logger.info(
+            f"Sentiment: processing {len(tickets)} tickets in {total_batches} "
+            f"batch(es) of up to {BATCH_SIZE}"
+        )
 
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are TARS, an expert Customer Experience Analyst "
-                            "for Windscribe VPN. You assess support ticket sentiment "
-                            "with precision. You always return valid JSON exactly as "
-                            "specified."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.15,
-                max_tokens=4096,
-                response_format={"type": "json_object"},
-            )
-
-            finish_reason = response.choices[0].finish_reason
-            usage = response.usage
-            logger.info(
-                f"Sentiment API: finish_reason={finish_reason}, "
-                f"tokens={usage.prompt_tokens}+{usage.completion_tokens}"
-                f"={usage.total_tokens}"
-            )
-            if finish_reason == "length":
+        for idx, batch in enumerate(batches, 1):
+            try:
+                batch_results = self._analyze_batch(batch, idx, total_batches)
+                all_results.update(batch_results)
+            except Exception as e:
                 logger.warning(
-                    "Sentiment response cut off by max_tokens — increase limit!"
+                    f"Sentiment batch {idx}/{total_batches} failed: {e} "
+                    f"— continuing with remaining batches"
                 )
 
-            raw = json.loads(response.choices[0].message.content)
-            results = raw.get("tickets", {})
+        logger.info(f"Sentiment scored {len(all_results)}/{len(tickets)} tickets total")
+        return all_results
 
-            valid_sentiments = {"positive", "neutral", "frustrated", "angry"}
-            valid_urgencies = {"low", "medium", "high", "critical"}
-            valid_churn = {"low", "medium", "high"}
+    def _analyze_batch(
+        self, batch: List[Dict], batch_num: int, total_batches: int
+    ) -> Dict[str, Dict]:
+        """Run a single GPT-4o call for one batch of tickets."""
+        prompt = self._build_prompt(batch)
 
-            cleaned: Dict[str, Dict] = {}
-            for num, data in results.items():
-                cleaned[str(num)] = {
-                    "sentiment": data.get("sentiment", "neutral")
-                        if data.get("sentiment") in valid_sentiments else "neutral",
-                    "urgency": data.get("urgency", "medium")
-                        if data.get("urgency") in valid_urgencies else "medium",
-                    "churn_risk": data.get("churn_risk", "low")
-                        if data.get("churn_risk") in valid_churn else "low",
-                    "summary": (data.get("summary") or "")[:200],
-                }
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": SYSTEM_MSG},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.15,
+            max_tokens=8192,
+            response_format={"type": "json_object"},
+        )
 
-            logger.info(f"Sentiment scored {len(cleaned)}/{len(tickets)} tickets")
-            return cleaned
+        finish_reason = response.choices[0].finish_reason
+        usage = response.usage
+        logger.info(
+            f"Sentiment batch {batch_num}/{total_batches}: "
+            f"finish_reason={finish_reason}, "
+            f"tokens={usage.prompt_tokens}+{usage.completion_tokens}"
+            f"={usage.total_tokens}"
+        )
+        if finish_reason == "length":
+            logger.warning(
+                f"Sentiment batch {batch_num} cut off by max_tokens"
+            )
 
-        except Exception as e:
-            logger.error(f"Sentiment analysis failed: {e}", exc_info=True)
-            return {}
+        raw = json.loads(response.choices[0].message.content)
+        results = raw.get("tickets", {})
+
+        cleaned: Dict[str, Dict] = {}
+        for num, data in results.items():
+            cleaned[str(num)] = {
+                "sentiment": data.get("sentiment", "neutral")
+                    if data.get("sentiment") in VALID_SENTIMENTS else "neutral",
+                "urgency": data.get("urgency", "medium")
+                    if data.get("urgency") in VALID_URGENCIES else "medium",
+                "churn_risk": data.get("churn_risk", "low")
+                    if data.get("churn_risk") in VALID_CHURN else "low",
+                "summary": (data.get("summary") or "")[:200],
+            }
+
+        return cleaned
 
     def _build_prompt(self, tickets: List[Dict]) -> str:
         ticket_count = len(tickets)
 
         tickets_text = []
         for t in tickets:
+            convo = t.get("full_conversation") or t.get("first_message", "")
+            convo = convo[:MAX_CONVO_CHARS]
             tickets_text.append(
                 f"Ticket #{t['number']}\n"
                 f"Subject: {t['subject']}\n"
-                f"Message: {t['first_message'][:600]}\n"
+                f"Conversation:\n{convo}\n"
                 f"---"
             )
         tickets_formatted = "\n".join(tickets_text)
@@ -114,7 +144,7 @@ class SentimentAnalyzer:
         return f"""You are TARS, an expert Customer Experience Analyst for Windscribe VPN.
 Analyze the following batch of {ticket_count} support tickets.
 
-For each ticket, determine the Sentiment, Urgency, Churn Risk, and a One-Line Summary based strictly on the provided text (subject + first 600 chars).
+For each ticket, determine the Sentiment, Urgency, Churn Risk, and a One-Line Summary based strictly on the provided text (subject + full customer conversation thread).
 
 === SCORING DIMENSIONS ===
 
@@ -147,7 +177,8 @@ For each ticket, determine the Sentiment, Urgency, Churn Risk, and a One-Line Su
      - GOOD: "Charged twice for the yearly Pro plan after attempting to upgrade from the free tier."
 
 === CALIBRATION RULES ===
-- Do not hallucinate context. Base your assessment ONLY on the ticket content.
+- Do not hallucinate context. Base your assessment ONLY on the ticket content provided below.
+- The conversation may contain multiple customer messages separated by "---". Consider the ENTIRE conversation arc when scoring — a customer who starts calm but becomes frustrated later should be scored as frustrated.
 - "Refund" nuance: A request for a *full* refund is HIGH churn risk. A request for a *partial* refund (e.g., "I forgot to use my promo code") is usually LOW or MEDIUM, as they intend to stay.
 - Competitor namedrop: If a user compares Windscribe negatively to a competitor, instantly score as HIGH churn risk.
 - Profanity alone does not equal 'angry'. Look at intent. "This cool feature is f***ing awesome" is positive.
