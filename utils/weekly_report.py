@@ -34,7 +34,8 @@ def _build_breakdown(
         if count == 0:
             continue
         bar = _bar(count, total)
-        lines.append(f"`{bar}` *{key.capitalize()}* — {count}  ({_pct(count, total)})")
+        label = "Neutral / Confused" if key == "neutral_confused" else key.capitalize()
+        lines.append(f"`{bar}` *{label}* — {count}  ({_pct(count, total)})")
     return "\n".join(lines)
 
 

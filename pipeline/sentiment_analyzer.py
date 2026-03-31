@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 BATCH_SIZE = 20
 MAX_CONVO_CHARS = 8000
 
-VALID_SENTIMENTS = {"positive", "neutral", "frustrated", "angry"}
+VALID_SENTIMENTS = {"positive", "neutral_confused", "frustrated", "angry"}
 VALID_URGENCIES = {"low", "medium", "high", "critical"}
 VALID_CHURN = {"low", "medium", "high"}
 
@@ -115,8 +115,8 @@ class SentimentAnalyzer:
         cleaned: Dict[str, Dict] = {}
         for num, data in results.items():
             cleaned[str(num)] = {
-                "sentiment": data.get("sentiment", "neutral")
-                    if data.get("sentiment") in VALID_SENTIMENTS else "neutral",
+                "sentiment": data.get("sentiment", "neutral_confused")
+                    if data.get("sentiment") in VALID_SENTIMENTS else "neutral_confused",
                 "urgency": data.get("urgency", "medium")
                     if data.get("urgency") in VALID_URGENCIES else "medium",
                 "churn_risk": data.get("churn_risk", "low")
@@ -148,10 +148,10 @@ For each ticket, determine the Sentiment, Urgency, Churn Risk, and a One-Line Su
 
 === SCORING DIMENSIONS ===
 
-1. SENTIMENT (Strictly one of: positive, neutral, frustrated, angry)
+1. SENTIMENT (Strictly one of: positive, neutral_confused, frustrated, angry)
    - positive: Satisfied, expressing gratitude, complimentary.
-   - neutral: Factual bug reports, standard questions, "matter-of-fact" tone. (Default for basic technical issues).
-   - frustrated: Annoyed, confused, repeated issues, losing patience, "why isn't this working."
+   - neutral_confused: Factual bug reports, standard questions, "matter-of-fact" tone, or simple confusion ("how do I do X?", "I don't understand this feature"). Default for basic technical issues and users who are confused but not yet annoyed.
+   - frustrated: Clearly annoyed, repeated issues, losing patience, expressing exasperation — "why isn't this working", "I've tried everything". Must show genuine irritation, not just confusion.
    - angry: Hostile, threatening, ALL CAPS, demanding, aggressive ultimatums.
 
 2. URGENCY (Strictly one of: low, medium, high, critical)
@@ -183,7 +183,8 @@ For each ticket, determine the Sentiment, Urgency, Churn Risk, and a One-Line Su
 - Competitor namedrop: If a user compares Windscribe negatively to a competitor, instantly score as HIGH churn risk.
 - Profanity alone does not equal 'angry'. Look at intent. "This cool feature is f***ing awesome" is positive.
 - Do not overuse 'critical' urgency. A user being unable to connect is 'high' urgency to them, but 'critical' is strictly reserved for security/fraud/legal issues.
-- "Frustrated" is the most common sentiment for support tickets — don't over-index on "angry" unless there's clear hostility.
+- "Frustrated" requires clear signs of annoyance or exasperation — not just confusion. A user who is simply lost or asking questions without irritation should be scored as "neutral_confused".
+- Don't over-index on "angry" unless there's clear hostility.
 
 === OUTPUT FORMAT ===
 Return ONLY raw, valid JSON.
