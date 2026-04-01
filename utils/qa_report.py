@@ -1,8 +1,9 @@
 """
-Weekly QA Report for TARS.
+QA Report for TARS.
 
-Pulls the last 7 days of QA-scored tickets from MongoDB, aggregates
-clusters by platform + feature_area, and posts flagged clusters to Slack.
+Pulls QA-scored tickets from MongoDB, aggregates clusters by
+platform + feature_area, and posts flagged clusters to Slack
+with colored attachments and hyperlinked ticket numbers.
 """
 import logging
 from datetime import datetime
@@ -12,6 +13,14 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 logger = logging.getLogger(__name__)
+
+CLUSTER_COLORS = [
+    "#2563EB",  # blue
+    "#059669",  # green
+    "#D97706",  # amber
+    "#7C3AED",  # violet
+    "#0891B2",  # cyan
+]
 
 FEATURE_AREA_LABELS = {
     "connection_engine": "Core Connection Engine",
@@ -51,35 +60,39 @@ def post_qa_report(
     mongodb_storage,
     slack_bot_token: str,
     slack_channel_id: str,
+    supportpal_base_url: str = "",
     days: int = 7,
-    min_count: int = 3,
+    min_count: int = 1,
 ) -> bool:
-    """Build and post the weekly QA cluster report. Returns True on success."""
+    """Build and post the QA cluster report. Returns True on success."""
 
     data = mongodb_storage.get_qa_clusters(days=days, min_count=min_count)
     clusters = data.get("clusters", [])
     total_bugs = data.get("total_bugs", 0)
 
     if not clusters:
-        logger.info("No QA clusters above threshold for the last %d days — skipping report", days)
+        logger.info("No QA bugs for the last %d day(s) — skipping report", days)
         return False
 
-    blocks = _build_report(clusters, total_bugs, days, min_count)
+    blocks, attachments = _build_report(
+        clusters, total_bugs, days, supportpal_base_url
+    )
 
     client = WebClient(token=slack_bot_token)
     today = datetime.utcnow().strftime("%B %d, %Y")
     try:
         client.chat_postMessage(
             channel=slack_channel_id,
-            text=f"TARS Weekly QA Report — {today}",
+            text=f"TARS QA Report — {today}",
             blocks=blocks,
+            attachments=attachments,
             unfurl_links=False,
             unfurl_media=False,
         )
-        logger.info("Weekly QA report posted to Slack")
+        logger.info("QA report posted to Slack")
         return True
     except SlackApiError as e:
-        logger.error(f"Failed to post weekly QA report: {e.response['error']}")
+        logger.error(f"Failed to post QA report: {e.response['error']}")
         return False
 
 
@@ -87,53 +100,67 @@ def _build_report(
     clusters: list,
     total_bugs: int,
     days: int,
-    min_count: int,
-) -> list:
-    """Build Slack blocks for the QA report."""
+    base_url: str,
+) -> tuple:
+    """Build Slack blocks + colored attachments for the QA report."""
     today = datetime.utcnow().strftime("%B %d, %Y")
 
     blocks = [
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": f"TARS Weekly QA Report — {today}"},
+            "text": {"type": "plain_text", "text": f"TARS QA Report — {today}"},
         },
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    f"*{total_bugs}* bug tickets identified over the past *{days}* days.\n"
-                    f"*{len(clusters)}* cluster(s) with {min_count}+ tickets flagged below."
+                    f"*{total_bugs}* bug ticket(s) identified over the past *{days}* day(s).\n"
+                    f"*{len(clusters)}* cluster(s) flagged below."
                 ),
             },
         },
-        {"type": "divider"},
     ]
 
-    for c in clusters:
+    attachments = []
+
+    for i, c in enumerate(clusters):
         platform = PLATFORM_LABELS.get(c["platform"], c["platform"])
         feature = FEATURE_AREA_LABELS.get(c["feature_area"], c["feature_area"])
         count = c["count"]
         tickets = c.get("tickets", [])
+        color = CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
 
         ticket_lines = []
         for t in tickets[:10]:
             num = t.get("ticket_number", "?")
+            sp_id = t.get("supportpal_id")
             subj = t.get("subject", "")[:55]
             pattern = t.get("error_pattern", "")
-            ticket_lines.append(f"  • *#{num}* — {subj}")
+
+            if base_url and sp_id:
+                url = f"{base_url}/en/admin/ticket/view/{sp_id}"
+                ticket_lines.append(f"  • <{url}|#{num}> — {subj}")
+            else:
+                ticket_lines.append(f"  • *#{num}* — {subj}")
+
             if pattern and pattern != "N/A":
                 ticket_lines.append(f"    _{pattern}_")
 
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": (
-                    f"`{platform}` · *{feature}* — *{count} tickets*\n"
-                    + "\n".join(ticket_lines)
-                ),
-            },
+        attachments.append({
+            "color": color,
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"`{platform}` · *{feature}* — *{count} ticket(s)*\n"
+                            + "\n".join(ticket_lines)
+                        ),
+                    },
+                },
+            ],
         })
 
-    return blocks
+    return blocks, attachments

@@ -130,6 +130,7 @@ export interface SentimentResponse {
 
 export interface QAClusterTicket {
   ticket_number: number;
+  supportpal_id: number;
   subject: string;
   error_pattern: string;
 }

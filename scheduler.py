@@ -91,28 +91,32 @@ class TARSScheduler:
         except Exception as e:
             logger.error(f"Weekly sentiment report error: {e}", exc_info=True)
 
-    def run_weekly_qa_report(self):
-        """Post the weekly QA cluster report (called by scheduler on Tuesdays)."""
+    def run_daily_qa_report(self):
+        """Post the daily QA cluster report (called by scheduler after daily analysis)."""
         try:
-            logger.info("🔍 Weekly QA report triggered")
+            logger.info("🔍 Daily QA report triggered")
             self.init_storage()
             if not self.mongodb_storage:
                 logger.error("MongoDB not available — cannot generate QA report")
                 return
 
+            api_url = os.getenv("SUPPORTPAL_API_URL", "")
+            base_url = api_url.replace("/api", "") if api_url else ""
+
             ok = post_qa_report(
                 mongodb_storage=self.mongodb_storage,
                 slack_bot_token=os.getenv("SLACK_BOT_TOKEN", ""),
                 slack_channel_id=os.getenv("SLACK_CHANNEL_ID", ""),
-                days=7,
-                min_count=3,
+                supportpal_base_url=base_url,
+                days=1,
+                min_count=1,
             )
             if ok:
-                logger.info("✅ Weekly QA report posted")
+                logger.info("✅ Daily QA report posted")
             else:
-                logger.warning("Weekly QA report had no clusters or failed")
+                logger.warning("Daily QA report had no bugs or failed")
         except Exception as e:
-            logger.error(f"Weekly QA report error: {e}", exc_info=True)
+            logger.error(f"Daily QA report error: {e}", exc_info=True)
 
     def start(self, cron_expression: str = "0 9 * * *"):
         """
@@ -161,12 +165,12 @@ class TARSScheduler:
                 replace_existing=True,
             )
 
-            # Add weekly QA report — Tuesdays at 10:30 AM UTC
+            # Add daily QA report — 30 min after daily analysis
             self.scheduler.add_job(
-                self.run_weekly_qa_report,
-                trigger=CronTrigger(day_of_week="tue", hour=10, minute=30),
-                id="tars_weekly_qa",
-                name="TARS Weekly QA Report",
+                self.run_daily_qa_report,
+                trigger=CronTrigger(hour=9, minute=30),
+                id="tars_daily_qa",
+                name="TARS Daily QA Report",
                 replace_existing=True,
             )
 

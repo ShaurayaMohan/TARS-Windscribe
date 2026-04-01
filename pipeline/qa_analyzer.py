@@ -188,7 +188,9 @@ For each ticket, determine:
 1. **is_bug** (true or false)
    Is this ticket reporting broken functionality, a software defect, or a product bug?
    - true: App crashes, features not working as designed, UI glitches, broken translations, protocol failures, payment processing errors in the app, config upload failures
-   - false: How-to questions, account requests, refund requests (not caused by a bug), general inquiries, feature requests, user misconfiguration, speed complaints, streaming service blocks
+   - false: How-to questions, account requests, refund requests, general inquiries, feature requests, user misconfiguration, speed complaints, streaming service blocks, server outages, "can't connect" without specific app-level error details, censorship/geo-blocking, forgotten passwords
+
+   When in doubt, default to is_bug=false. Only flag true when the ticket clearly describes broken product behavior, not just a bad experience.
 
 2. **feature_area** (strictly one of the values below)
    Which part of the Windscribe product is affected?
@@ -228,11 +230,16 @@ For each ticket, determine:
 
 === RULES ===
 - Base your assessment ONLY on the ticket content. Do not hallucinate.
+- When in doubt, default to is_bug=false. Only flag is_bug=true when the ticket clearly describes broken product behavior, not just a bad experience.
 - If a ticket mentions a specific protocol by name (WireGuard, IKEv2, OpenVPN, Stealth, Amnezia), use the matching protocol_* category rather than connection_engine.
-- A user unable to connect is NOT automatically a bug — it could be a censorship/network issue. Look for indicators of broken product behavior vs. external factors.
+- "Can't connect" alone is NOT a bug — the user could be on a censored network, behind a restrictive firewall, or have ISP issues. Only flag as a bug if the ticket describes specific app-level failure behavior (crash, error message, protocol handshake failure visible in the app).
+- "VPN doesn't work in my country" is almost always censorship, NOT a bug. Only flag if the user describes specific app-level misbehavior beyond simply failing to connect.
+- Server outages and capacity issues (e.g., "server X is down", "all servers are slow") are infrastructure problems, NOT product bugs. Mark is_bug=false.
 - Port forwarding issues are almost always user misconfiguration, NOT a bug. Only flag static_ip_app_issues for actual app-side defects.
 - Speed complaints alone are NOT bugs (no speed_performance category exists). Only flag if there's a clear app defect causing the speed issue.
 - Streaming service blocks are NOT bugs — they are expected behavior changes by the streaming service.
+- Forgotten passwords and standard account recovery are NOT bugs. Only flag authentication when the login/2FA/reset flow itself is broken (e.g., reset email never arrives despite correct email, 2FA code accepted but app still rejects).
+- Refund or cancellation requests that mention a bad experience are NOT bugs unless they also describe a specific product defect.
 
 === OUTPUT FORMAT ===
 Return ONLY raw, valid JSON.

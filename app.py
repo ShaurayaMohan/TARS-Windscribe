@@ -318,7 +318,7 @@ def get_qa():
             }), 200
 
         days = request.args.get('days', default=7, type=int)
-        min_count = request.args.get('min_count', default=3, type=int)
+        min_count = request.args.get('min_count', default=1, type=int)
         data = storage.get_qa_clusters(days=days, min_count=min_count)
         if not data:
             data = {

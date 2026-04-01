@@ -358,7 +358,7 @@ class MongoDBStorage:
 
     # ── QA helpers ────────────────────────────────────────────────────────
 
-    def get_qa_clusters(self, days: int = 7, min_count: int = 3) -> Dict:
+    def get_qa_clusters(self, days: int = 7, min_count: int = 1) -> Dict:
         """Aggregate bug tickets by platform + feature_area over the last *days*."""
         try:
             cutoff = datetime.utcnow() - timedelta(days=days)
@@ -389,6 +389,7 @@ class MongoDBStorage:
                         "tickets": {
                             "$push": {
                                 "ticket_number": "$ticket_number",
+                                "supportpal_id": "$supportpal_id",
                                 "subject": "$subject",
                                 "error_pattern": "$qa_error_pattern",
                             }
