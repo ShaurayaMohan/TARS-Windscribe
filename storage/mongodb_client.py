@@ -72,6 +72,9 @@ class MongoDBStorage:
         self.tickets.create_index([("sentiment", ASCENDING)])
         self.tickets.create_index([("churn_risk", ASCENDING)])
         self.tickets.create_index([("urgency", ASCENDING)])
+        self.tickets.create_index([("is_bug", ASCENDING)])
+        self.tickets.create_index([("qa_feature_area", ASCENDING)])
+        self.tickets.create_index([("qa_platform", ASCENDING)])
 
     # ── Write ───────────────────────────────────────────────────────────────
 
@@ -352,6 +355,81 @@ class MongoDBStorage:
         except Exception as e:
             logger.error(f"Error aggregating sentiment data: {e}")
             return {}
+
+    # ── QA helpers ────────────────────────────────────────────────────────
+
+    def get_qa_clusters(self, days: int = 7, min_count: int = 3) -> Dict:
+        """Aggregate bug tickets by platform + feature_area over the last *days*."""
+        try:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+
+            analysis_ids = [
+                a["_id"]
+                for a in self.analyses.find(
+                    {"run_date": {"$gte": cutoff}}, {"_id": 1}
+                )
+            ]
+            if not analysis_ids:
+                return {"period_days": days, "clusters": [], "total_bugs": 0}
+
+            pipeline = [
+                {
+                    "$match": {
+                        "analysis_id": {"$in": analysis_ids},
+                        "is_bug": True,
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": {
+                            "platform": "$qa_platform",
+                            "feature_area": "$qa_feature_area",
+                        },
+                        "count": {"$sum": 1},
+                        "tickets": {
+                            "$push": {
+                                "ticket_number": "$ticket_number",
+                                "subject": "$subject",
+                                "error_pattern": "$qa_error_pattern",
+                            }
+                        },
+                    }
+                },
+                {"$match": {"count": {"$gte": min_count}}},
+                {"$sort": {"count": -1}},
+            ]
+
+            clusters_raw = list(self.tickets.aggregate(pipeline))
+
+            total_bugs_pipeline = [
+                {
+                    "$match": {
+                        "analysis_id": {"$in": analysis_ids},
+                        "is_bug": True,
+                    }
+                },
+                {"$count": "n"},
+            ]
+            total_result = list(self.tickets.aggregate(total_bugs_pipeline))
+            total_bugs = total_result[0]["n"] if total_result else 0
+
+            clusters = []
+            for c in clusters_raw:
+                clusters.append({
+                    "platform": c["_id"]["platform"],
+                    "feature_area": c["_id"]["feature_area"],
+                    "count": c["count"],
+                    "tickets": c["tickets"][:20],
+                })
+
+            return {
+                "period_days": days,
+                "total_bugs": total_bugs,
+                "clusters": clusters,
+            }
+        except Exception as e:
+            logger.error(f"Error aggregating QA data: {e}")
+            return {"period_days": days, "clusters": [], "total_bugs": 0}
 
     # ── Config (prompt templates) ───────────────────────────────────────────
 

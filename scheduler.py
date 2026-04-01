@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from pipeline.analyzer import TARSPipeline
 from storage.mongodb_client import MongoDBStorage
 from utils.weekly_report import post_weekly_sentiment_report
+from utils.qa_report import post_qa_report
 
 # Load environment variables
 load_dotenv()
@@ -89,7 +90,30 @@ class TARSScheduler:
                 logger.warning("Weekly sentiment report had no data or failed")
         except Exception as e:
             logger.error(f"Weekly sentiment report error: {e}", exc_info=True)
-    
+
+    def run_weekly_qa_report(self):
+        """Post the weekly QA cluster report (called by scheduler on Tuesdays)."""
+        try:
+            logger.info("🔍 Weekly QA report triggered")
+            self.init_storage()
+            if not self.mongodb_storage:
+                logger.error("MongoDB not available — cannot generate QA report")
+                return
+
+            ok = post_qa_report(
+                mongodb_storage=self.mongodb_storage,
+                slack_bot_token=os.getenv("SLACK_BOT_TOKEN", ""),
+                slack_channel_id=os.getenv("SLACK_CHANNEL_ID", ""),
+                days=7,
+                min_count=3,
+            )
+            if ok:
+                logger.info("✅ Weekly QA report posted")
+            else:
+                logger.warning("Weekly QA report had no clusters or failed")
+        except Exception as e:
+            logger.error(f"Weekly QA report error: {e}", exc_info=True)
+
     def start(self, cron_expression: str = "0 9 * * *"):
         """
         Start the scheduler
@@ -134,6 +158,15 @@ class TARSScheduler:
                 trigger=CronTrigger(day_of_week="tue", hour=10, minute=0),
                 id="tars_weekly_sentiment",
                 name="TARS Weekly Sentiment Report",
+                replace_existing=True,
+            )
+
+            # Add weekly QA report — Tuesdays at 10:30 AM UTC
+            self.scheduler.add_job(
+                self.run_weekly_qa_report,
+                trigger=CronTrigger(day_of_week="tue", hour=10, minute=30),
+                id="tars_weekly_qa",
+                name="TARS Weekly QA Report",
                 replace_existing=True,
             )
 

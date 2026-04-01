@@ -128,6 +128,25 @@ export interface SentimentResponse {
   }>;
 }
 
+export interface QAClusterTicket {
+  ticket_number: number;
+  subject: string;
+  error_pattern: string;
+}
+
+export interface QACluster {
+  platform: string;
+  feature_area: string;
+  count: number;
+  tickets: QAClusterTicket[];
+}
+
+export interface QAResponse {
+  period_days: number;
+  total_bugs: number;
+  clusters: QACluster[];
+}
+
 // ─── Base ─────────────────────────────────────────────────────────────────────
 
 const BASE = '';  // Vite proxy forwards /api/* → http://localhost:5001
@@ -205,6 +224,12 @@ export function savePrompt(text: string): Promise<{ status: string }> {
 /** GET /api/sentiment?days=N — Aggregated sentiment stats */
 export async function fetchSentiment(days = 7): Promise<SentimentResponse> {
   const raw = await get<SentimentResponse | SentimentResponse[]>(`/api/sentiment?days=${days}`);
+  return unwrapArray(raw);
+}
+
+/** GET /api/qa?days=N&min_count=M — Aggregated QA cluster data */
+export async function fetchQAClusters(days = 7, minCount = 3): Promise<QAResponse> {
+  const raw = await get<QAResponse | QAResponse[]>(`/api/qa?days=${days}&min_count=${minCount}`);
   return unwrapArray(raw);
 }
 

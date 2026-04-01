@@ -304,6 +304,35 @@ def get_sentiment():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/qa', methods=['GET'])
+def get_qa():
+    """Get aggregated QA cluster data for the dashboard."""
+    try:
+        storage = get_mongodb_storage()
+        if not storage:
+            return jsonify({
+                'period_days': 7,
+                'total_bugs': 0,
+                'clusters': [],
+                'warning': 'MongoDB not configured',
+            }), 200
+
+        days = request.args.get('days', default=7, type=int)
+        min_count = request.args.get('min_count', default=3, type=int)
+        data = storage.get_qa_clusters(days=days, min_count=min_count)
+        if not data:
+            data = {
+                'period_days': days,
+                'total_bugs': 0,
+                'clusters': [],
+            }
+        return jsonify(data), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching QA clusters: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/prompt', methods=['GET'])
 def get_prompt():
     """Return the AI analysis prompt template.

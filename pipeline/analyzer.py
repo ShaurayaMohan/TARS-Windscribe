@@ -17,6 +17,7 @@ from typing import Dict, Optional
 from pipeline.supportpal_client import SupportPalClient
 from pipeline.ai_analyzer import AIAnalyzer
 from pipeline.sentiment_analyzer import SentimentAnalyzer
+from pipeline.qa_analyzer import QAAnalyzer
 from utils.slack_formatter import SlackFormatter
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,7 @@ class TARSPipeline:
             logger.info(f"Brand filter active: only fetching brand_id={supportpal_brand_id} tickets")
         self.ai_analyzer = AIAnalyzer(openai_api_key)
         self.sentiment_analyzer = SentimentAnalyzer(openai_api_key)
+        self.qa_analyzer = QAAnalyzer(openai_api_key)
 
         # Extract base URL for SupportPal ticket links
         base_url = supportpal_api_url.replace("/api", "")
@@ -255,6 +257,17 @@ class TARSPipeline:
             else:
                 logger.warning("Sentiment analysis returned no results — continuing without it")
 
+            # ── Step 2.5c: QA analysis ────────────────────────────────────────
+            logger.info("Step 2.5c/5: Running QA analysis...")
+            qa_results = self.qa_analyzer.analyze(tickets)
+            if qa_results:
+                bug_count = sum(1 for r in qa_results.values() if r.get("is_bug"))
+                logger.info(
+                    f"QA scored {len(qa_results)} tickets, {bug_count} flagged as bugs"
+                )
+            else:
+                logger.warning("QA analysis returned no results — continuing without it")
+
             # ── Step 3: Save to MongoDB (BEFORE Slack) ─────────────────────────
             if self.mongodb_storage:
                 try:
@@ -314,6 +327,7 @@ class TARSPipeline:
                         msg = _clean_chatlog_prefix(msg)
 
                         sent = sentiment_results.get(num, {})
+                        qa = qa_results.get(num, {})
                         ticket_docs.append({
                             "analysis_id": analysis_oid,
                             "ticket_number": int(t["number"]),
@@ -334,6 +348,10 @@ class TARSPipeline:
                             "urgency": sent.get("urgency"),
                             "churn_risk": sent.get("churn_risk"),
                             "sentiment_summary": sent.get("summary"),
+                            "is_bug": qa.get("is_bug"),
+                            "qa_feature_area": qa.get("feature_area"),
+                            "qa_platform": qa.get("platform"),
+                            "qa_error_pattern": qa.get("error_pattern"),
                         })
 
                     saved = self.mongodb_storage.save_tickets(ticket_docs)
