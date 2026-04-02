@@ -1,85 +1,146 @@
-# TARS Deployment Guide
+# TARS Deployment Guide — Demerzel
 
-## Deploy to Render
+TARS runs on **Demerzel** (`demerzel.ca3.dev.windscribe.org`) as a systemd service.
 
-### 1. Push to GitHub
+## Initial Setup
+
+### 1. Clone and install
+
 ```bash
-cd /Users/shauraya/Desktop/TARS
-git init
-git add .
-git commit -m "Initial TARS commit"
-git branch -M main
-git remote add origin YOUR_GITHUB_REPO_URL
-git push -u origin main
+ssh demerzel.ca3.dev.windscribe.org
+cd /opt
+git clone https://github.com/ShaurayaMohan/TARS-Windscribe.git tars
+cd tars
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### 2. Create Render Web Service
-1. Go to https://render.com
-2. Click "New +" → "Web Service"
-3. Connect your GitHub repository
-4. Configure:
-   - **Name**: `tars` (or your choice)
-   - **Environment**: `Python 3`
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `python main.py`
-   - **Plan**: Free (or paid for better performance)
+### 2. Configure environment
 
-### 3. Add Environment Variables in Render
-Go to your service → Environment → Add the following:
+```bash
+cp .env.example .env
+nano .env
+```
+
+Required variables:
 
 ```
-SUPPORTPAL_API_KEY=your_key_here
+SUPPORTPAL_API_KEY=<key>
 SUPPORTPAL_API_URL=https://support.int.windscribe.com/api
-OPENAI_API_KEY=your_key_here
-SLACK_WEBHOOK_URL=your_webhook_here
+SUPPORTPAL_BRAND_ID=1
+OPENAI_API_KEY=<key>
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_CHANNEL_ID=C0ACXMD0KAA
+SLACK_APP_TOKEN=xapp-...
+MONGODB_URI=mongodb://...
 SCHEDULE_CRON=0 9 * * *
-PORT=10000
-HOST=0.0.0.0
 ```
 
-### 4. Deploy
-- Click "Create Web Service"
-- Render will automatically deploy
-- Check logs to verify it started correctly
+### 3. Create systemd service
 
-### 5. Verify It's Running
-- Visit your Render URL (e.g., `https://tars.onrender.com`)
-- You should see: `{"name":"TARS","status":"running"}`
-- Check logs for: "✅ TARS is now running"
-- Confirm scheduler shows: "Next run: [tomorrow at 9 AM]"
-
----
-
-## Manual Trigger (Optional)
-To manually trigger analysis via API:
 ```bash
-curl -X POST https://your-tars-url.onrender.com/analyze \
+sudo nano /etc/systemd/system/tars.service
+```
+
+```ini
+[Unit]
+Description=TARS Ticket Analysis & Reporting System
+After=network.target mongod.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/tars
+EnvironmentFile=/opt/tars/.env
+ExecStart=/opt/tars/venv/bin/python main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable tars
+sudo systemctl start tars
+```
+
+## Deploying Updates
+
+```bash
+ssh demerzel.ca3.dev.windscribe.org
+cd /opt/tars
+git pull
+sudo systemctl restart tars
+```
+
+If new Python dependencies were added:
+
+```bash
+source venv/bin/activate
+pip install -r requirements.txt
+sudo systemctl restart tars
+```
+
+## Monitoring
+
+### Service status
+
+```bash
+sudo systemctl status tars
+```
+
+### Live logs
+
+```bash
+sudo journalctl -u tars -f
+```
+
+### Recent logs
+
+```bash
+sudo journalctl -u tars --since "1 hour ago"
+```
+
+### Health check
+
+```bash
+curl http://localhost:5000/health
+```
+
+### Manual analysis trigger
+
+```bash
+curl -X POST http://localhost:5000/analyze \
   -H "Content-Type: application/json" \
   -d '{"hours": 24}'
 ```
 
----
-
-## Monitoring
-- **Render Dashboard**: Check logs, uptime, errors
-- **Slack Channel**: Verify daily reports arrive at 9 AM
-- **Health Endpoint**: `https://your-tars-url.onrender.com/health`
-
----
-
 ## Troubleshooting
 
-### Server won't start
-- Check Render logs for errors
-- Verify all environment variables are set
-- Make sure OpenAI/SupportPal/Slack APIs are accessible
+### Service won't start
+- Check logs: `sudo journalctl -u tars -n 50`
+- Verify `.env` exists and has all required variables
+- Verify venv has all dependencies: `source venv/bin/activate && pip install -r requirements.txt`
 
-### No reports appearing
-- Check scheduler logs: "Next run time"
-- Verify SCHEDULE_CRON is valid
-- Test manual trigger endpoint
+### No daily reports
+- Check scheduler is running: look for "Scheduler started" in logs
+- Verify `SCHEDULE_CRON` is set (default: `0 9 * * *`)
+- Verify Slack token and channel ID are correct
 
-### Reports failing
-- Check SupportPal API connectivity
-- Verify OpenAI API key has credits
-- Test Slack webhook URL manually
+### QA report not posting
+- The QA report runs inline after the daily analysis completes — check that the daily analysis itself succeeded
+- Look for "Daily QA report triggered" in logs
+
+### MongoDB connection errors
+- Verify `MONGODB_URI` is correct
+- Check MongoDB is running: `sudo systemctl status mongod`
+
+## Scheduled Jobs
+
+| Job | Schedule | Notes |
+|-----|----------|-------|
+| Daily analysis + QA report | 9:00 AM UTC | QA report posts after analysis completes |
+| Weekly sentiment report | Tuesday 10:00 AM UTC | Separate cron job |
