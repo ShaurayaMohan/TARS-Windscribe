@@ -55,7 +55,7 @@ class TARSScheduler:
             )
     
     def run_scheduled_analysis(self):
-        """Run the analysis (called by scheduler)"""
+        """Run the analysis, then post the daily QA report."""
         try:
             logger.info("🕐 Scheduled analysis triggered")
             self.init_pipeline()
@@ -63,6 +63,7 @@ class TARSScheduler:
             
             if success:
                 logger.info("✅ Scheduled analysis completed successfully")
+                self.run_daily_qa_report()
             else:
                 logger.error("❌ Scheduled analysis failed")
                 
@@ -162,15 +163,6 @@ class TARSScheduler:
                 trigger=CronTrigger(day_of_week="tue", hour=10, minute=0),
                 id="tars_weekly_sentiment",
                 name="TARS Weekly Sentiment Report",
-                replace_existing=True,
-            )
-
-            # Add daily QA report — 30 min after daily analysis
-            self.scheduler.add_job(
-                self.run_daily_qa_report,
-                trigger=CronTrigger(hour=9, minute=30),
-                id="tars_daily_qa",
-                name="TARS Daily QA Report",
                 replace_existing=True,
             )
 
