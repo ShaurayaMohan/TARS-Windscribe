@@ -186,11 +186,11 @@ Analyze the following batch of {ticket_count} support tickets and extract struct
 For each ticket, determine:
 
 1. **is_bug** (true or false)
-   Is this ticket reporting broken functionality, a software defect, or a product bug?
-   - true: App crashes, features not working as designed, UI glitches, broken translations, protocol failures, payment processing errors in the app, config upload failures
-   - false: How-to questions, account requests, refund requests, general inquiries, feature requests, user misconfiguration, speed complaints, streaming service blocks, server outages, "can't connect" without specific app-level error details, censorship/geo-blocking, forgotten passwords
+   Is this ticket reporting broken functionality, a software defect, or a product bug that a QA engineer could reproduce and fix in the app's code?
+   - true: App crashes, features not working as designed, UI glitches, broken translations, protocol connection drops/failures with app-level errors, incorrect data displayed in the app, config upload failures
+   - false: How-to questions, account requests, refund requests, general inquiries, feature requests, user misconfiguration, speed/performance complaints (even if a specific protocol is mentioned), streaming service blocks, server outages, censorship/geo-blocking/network restrictions, forgotten passwords, email delivery failures (confirmation or reset emails not arriving), bank-side payment rejections, app store subscription activation issues (Google Play / Apple / Amazon purchase not activating)
 
-   When in doubt, default to is_bug=false. Only flag true when the ticket clearly describes broken product behavior, not just a bad experience.
+   When in doubt, default to is_bug=false. Ask yourself: "Could a QA engineer reproduce and fix this in the app's code?" If the answer is no — because it's a bank, email server, app store, network, or infrastructure issue — mark is_bug=false.
 
 2. **feature_area** (strictly one of the values below)
    Which part of the Windscribe product is affected?
@@ -211,8 +211,8 @@ For each ticket, determine:
    - dns_robert: DNS resolution failures, encrypted DNS issues, R.O.B.E.R.T. false positives or negatives
    - split_tunneling: Split tunnel not performing as configured — inclusive mode not including specified apps/IPs, exclusive mode not excluding them
    - allow_lan_traffic: LAN access broken while VPN is active — can't reach printers, NAS, Chromecast, or other local network devices with "Allow LAN Traffic" enabled
-   - authentication: Login failures, 2FA lockouts, password reset issues, lazy login (TV) not working
-   - billing_app_bugs: App-side payment issues only — payment attempt crashes, promo code not applying in-app, wrong currency displayed. NOT system-side issues like failed renewals or Apple not crediting plans
+   - authentication: Login failures where the app itself malfunctions (login loops, app shows wrong account data, 2FA flow broken in the app), lazy login (TV) not working. NOT email delivery issues — if a confirmation email, reset email, or verification email doesn't arrive, that is a backend/email infrastructure problem, NOT an app bug
+   - billing_app_bugs: App-side payment issues only — payment attempt crashes the app, promo code UI broken, wrong currency displayed in the app. NOT bank-side rejections (bank declined, payment blocked by processor), NOT app store activation failures (Google Play / Apple / Amazon subscription purchased but not showing on account), NOT failed renewals, NOT subscription management disputes
    - static_ip_app_issues: App-side static IP bugs — crashes when connecting to static IP, failures switching between static IP and regular locations, visual issues with static IP in the apps. NOT port forwarding misconfiguration
    - config_generation: Manual config file download or generation failures from the website, or issues uploading/adding configs to apps
    - other: Doesn't clearly fit any of the above
@@ -230,15 +230,19 @@ For each ticket, determine:
 
 === RULES ===
 - Base your assessment ONLY on the ticket content. Do not hallucinate.
-- When in doubt, default to is_bug=false. Only flag is_bug=true when the ticket clearly describes broken product behavior, not just a bad experience.
+- When in doubt, default to is_bug=false. Ask: "Could a QA engineer reproduce and fix this in the app's code?" If no, it's not a bug.
 - If a ticket mentions a specific protocol by name (WireGuard, IKEv2, OpenVPN, Stealth, Amnezia), use the matching protocol_* category rather than connection_engine.
-- "Can't connect" alone is NOT a bug — the user could be on a censored network, behind a restrictive firewall, or have ISP issues. Only flag as a bug if the ticket describes specific app-level failure behavior (crash, error message, protocol handshake failure visible in the app).
-- "VPN doesn't work in my country" is almost always censorship, NOT a bug. Only flag if the user describes specific app-level misbehavior beyond simply failing to connect.
-- Server outages and capacity issues (e.g., "server X is down", "all servers are slow") are infrastructure problems, NOT product bugs. Mark is_bug=false.
-- Port forwarding issues are almost always user misconfiguration, NOT a bug. Only flag static_ip_app_issues for actual app-side defects.
-- Speed complaints alone are NOT bugs (no speed_performance category exists). Only flag if there's a clear app defect causing the speed issue.
-- Streaming service blocks are NOT bugs — they are expected behavior changes by the streaming service.
-- Forgotten passwords and standard account recovery are NOT bugs. Only flag authentication when the login/2FA/reset flow itself is broken (e.g., reset email never arrives despite correct email, 2FA code accepted but app still rejects).
+- "Can't connect" alone is NOT a bug — the user could be on a censored network, behind a restrictive firewall, or have ISP issues. Only flag as a bug if the ticket describes specific app-level failure behavior (crash, error message, repeated protocol handshake failure visible in the app).
+- If "network restrictions", "restrictive network", or "censorship" appears anywhere in the ticket, default to is_bug=false UNLESS the ticket describes a clear app-level crash or UI defect completely unrelated to the network restriction.
+- "VPN doesn't work in my country" is censorship, NOT a bug.
+- Server outages and capacity issues are infrastructure problems, NOT bugs.
+- Speed and performance complaints are NEVER bugs, even when a specific protocol is mentioned. "Slow speed on WireGuard" = NOT a bug. "App crashes on WireGuard" = bug. The distinction is broken functionality vs. poor performance.
+- Port forwarding issues are almost always user misconfiguration, NOT a bug.
+- Streaming service blocks are NOT bugs — expected behavior changes by the streaming service.
+- Email delivery failures are NOT bugs. If a confirmation email, password reset email, or verification email doesn't arrive, that is a backend/email infrastructure issue. Do NOT flag these under authentication.
+- Bank-side payment issues are NOT bugs. If a payment is blocked by the bank, declined by the processor, or flagged for fraud, that is outside the app. Do NOT flag these under billing_app_bugs.
+- App store subscription activation failures are NOT bugs. If a Google Play, Apple, or Amazon purchase doesn't activate the subscription on the user's account, that is a store-side issue. Do NOT flag these under billing_app_bugs.
+- Forgotten passwords and standard account recovery are NOT bugs.
 - Refund or cancellation requests that mention a bad experience are NOT bugs unless they also describe a specific product defect.
 
 === OUTPUT FORMAT ===
