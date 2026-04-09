@@ -359,7 +359,7 @@ class MongoDBStorage:
     # ── QA helpers ────────────────────────────────────────────────────────
 
     def get_qa_clusters(self, days: int = 7, min_count: int = 1) -> Dict:
-        """Aggregate bug tickets by platform + feature_area over the last *days*."""
+        """Aggregate bug tickets by platform over the last *days*."""
         try:
             cutoff = datetime.utcnow() - timedelta(days=days)
 
@@ -381,16 +381,14 @@ class MongoDBStorage:
                 },
                 {
                     "$group": {
-                        "_id": {
-                            "platform": "$qa_platform",
-                            "feature_area": "$qa_feature_area",
-                        },
+                        "_id": "$qa_platform",
                         "count": {"$sum": 1},
                         "tickets": {
                             "$push": {
                                 "ticket_number": "$ticket_number",
                                 "supportpal_id": "$supportpal_id",
                                 "subject": "$subject",
+                                "feature_area": "$qa_feature_area",
                                 "error_pattern": "$qa_error_pattern",
                             }
                         },
@@ -417,8 +415,7 @@ class MongoDBStorage:
             clusters = []
             for c in clusters_raw:
                 clusters.append({
-                    "platform": c["_id"]["platform"],
-                    "feature_area": c["_id"]["feature_area"],
+                    "platform": c["_id"],
                     "count": c["count"],
                     "tickets": c["tickets"][:20],
                 })

@@ -132,12 +132,12 @@ export interface QAClusterTicket {
   ticket_number: number;
   supportpal_id: number;
   subject: string;
+  feature_area: string;
   error_pattern: string;
 }
 
 export interface QACluster {
   platform: string;
-  feature_area: string;
   count: number;
   tickets: QAClusterTicket[];
 }

@@ -2,8 +2,8 @@
 QA Report for TARS.
 
 Pulls QA-scored tickets from MongoDB, aggregates clusters by
-platform + feature_area, and posts flagged clusters to Slack
-with colored attachments and hyperlinked ticket numbers.
+platform, and posts flagged clusters to Slack with one colored
+attachment per platform and feature area shown inline per ticket.
 """
 import logging
 from datetime import datetime
@@ -14,32 +14,36 @@ from slack_sdk.errors import SlackApiError
 
 logger = logging.getLogger(__name__)
 
-CLUSTER_COLORS = [
-    "#2563EB",  # blue
-    "#059669",  # green
-    "#D97706",  # amber
-    "#7C3AED",  # violet
-    "#0891B2",  # cyan
-]
+PLATFORM_COLORS = {
+    "windows": "#0078D4",
+    "macos": "#A2AAAD",
+    "linux": "#E95420",
+    "android": "#3DDC84",
+    "ios": "#147EFB",
+    "router": "#FF6F00",
+    "browser_extension": "#4285F4",
+    "tv": "#7C3AED",
+    "unknown": "#6B7280",
+}
 
 FEATURE_AREA_LABELS = {
-    "connection_engine": "Core Connection Engine",
+    "connection_engine": "Connection Engine",
     "protocol_wireguard": "WireGuard",
     "protocol_ikev2": "IKEv2",
-    "protocol_openvpn": "OpenVPN (UDP/TCP)",
-    "protocol_stealth": "Stealth / WStunnel",
+    "protocol_openvpn": "OpenVPN",
+    "protocol_stealth": "Stealth",
     "protocol_amnezia": "AmneziaWG",
-    "app_crash": "App Crash / Won't Launch",
-    "app_ui": "UI / UX Bugs",
-    "localization": "Localization / Translation",
+    "app_crash": "App Crash",
+    "app_ui": "UI/UX",
+    "localization": "Localization",
     "look_and_feel": "Look & Feel",
-    "dns_robert": "DNS / R.O.B.E.R.T.",
+    "dns_robert": "DNS/ROBERT",
     "split_tunneling": "Split Tunneling",
-    "allow_lan_traffic": "Allow LAN Traffic",
-    "authentication": "Authentication / Login",
-    "billing_app_bugs": "Billing App Bugs",
-    "static_ip_app_issues": "Static IP App Issues",
-    "config_generation": "Config Generation / Upload",
+    "allow_lan_traffic": "LAN Traffic",
+    "authentication": "Auth",
+    "billing_app_bugs": "Billing",
+    "static_ip_app_issues": "Static IP",
+    "config_generation": "Config Gen",
     "other": "Other",
 }
 
@@ -52,7 +56,7 @@ PLATFORM_LABELS = {
     "router": "Router",
     "browser_extension": "Browser Extension",
     "tv": "TV",
-    "unknown": "Unknown",
+    "unknown": "Unknown Platform",
 }
 
 
@@ -102,7 +106,7 @@ def _build_report(
     days: int,
     base_url: str,
 ) -> tuple:
-    """Build Slack blocks + colored attachments for the QA report."""
+    """Build Slack blocks + one colored attachment per platform."""
     today = datetime.utcnow().strftime("%B %d, %Y")
 
     blocks = [
@@ -115,8 +119,8 @@ def _build_report(
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    f"*{total_bugs}* bug ticket(s) identified over the past *{days}* day(s).\n"
-                    f"*{len(clusters)}* cluster(s) flagged below."
+                    f"*{total_bugs}* bug ticket(s) flagged over the past *{days}* day(s), "
+                    f"across *{len(clusters)}* platform(s)."
                 ),
             },
         },
@@ -124,25 +128,27 @@ def _build_report(
 
     attachments = []
 
-    for i, c in enumerate(clusters):
-        platform = PLATFORM_LABELS.get(c["platform"], c["platform"])
-        feature = FEATURE_AREA_LABELS.get(c["feature_area"], c["feature_area"])
+    for c in clusters:
+        platform_key = c["platform"]
+        platform = PLATFORM_LABELS.get(platform_key, platform_key)
         count = c["count"]
         tickets = c.get("tickets", [])
-        color = CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
+        color = PLATFORM_COLORS.get(platform_key, "#6B7280")
 
         ticket_lines = []
-        for t in tickets[:10]:
+        for t in tickets[:15]:
             num = t.get("ticket_number", "?")
             sp_id = t.get("supportpal_id")
             subj = t.get("subject", "")[:55]
+            fa = t.get("feature_area", "other")
+            fa_label = FEATURE_AREA_LABELS.get(fa, fa)
             pattern = t.get("error_pattern", "")
 
             if base_url and sp_id:
                 url = f"{base_url}/en/admin/ticket/view/{sp_id}"
-                ticket_lines.append(f"  • <{url}|#{num}> — {subj}")
+                ticket_lines.append(f"  `{fa_label}` <{url}|#{num}> — {subj}")
             else:
-                ticket_lines.append(f"  • *#{num}* — {subj}")
+                ticket_lines.append(f"  `{fa_label}` *#{num}* — {subj}")
 
             if pattern and pattern != "N/A":
                 ticket_lines.append(f"    _{pattern}_")
@@ -155,7 +161,7 @@ def _build_report(
                     "text": {
                         "type": "mrkdwn",
                         "text": (
-                            f"`{platform}` · *{feature}* — *{count} ticket(s)*\n"
+                            f"*{platform}* — *{count} ticket(s)*\n"
                             + "\n".join(ticket_lines)
                         ),
                     },
