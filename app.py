@@ -333,6 +333,89 @@ def get_qa():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/qa/tickets', methods=['GET'])
+def get_qa_tickets():
+    """List individual QA bug tickets for the dashboard table."""
+    try:
+        storage = get_mongodb_storage()
+        if not storage:
+            return jsonify({'count': 0, 'tickets': [], 'warning': 'MongoDB not configured'}), 200
+
+        days = request.args.get('days', default=30, type=int)
+        platform = request.args.get('platform', default=None, type=str)
+        status = request.args.get('status', default=None, type=str)
+
+        tickets = storage.get_qa_tickets(days=days, platform=platform, status=status)
+        return jsonify({'count': len(tickets), 'tickets': tickets}), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching QA tickets: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/qa/stats', methods=['GET'])
+def get_qa_stats():
+    """Aggregate QA dashboard stats."""
+    try:
+        storage = get_mongodb_storage()
+        if not storage:
+            return jsonify({
+                'period_days': 30, 'total_bugs': 0, 'not_tested': 0,
+                'reproduced': 0, 'escalated': 0, 'dismissed': 0,
+                'by_platform': {}, 'warning': 'MongoDB not configured',
+            }), 200
+
+        days = request.args.get('days', default=30, type=int)
+        stats = storage.get_qa_stats(days=days)
+        return jsonify(stats), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching QA stats: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/qa/tickets/<ticket_id>/status', methods=['PATCH'])
+def update_qa_ticket_status(ticket_id):
+    """Update qa_status on a single ticket."""
+    try:
+        storage = get_mongodb_storage()
+        if not storage:
+            return jsonify({'error': 'MongoDB not configured'}), 503
+
+        body = request.get_json(silent=True) or {}
+        new_status = body.get('status', '').strip()
+
+        if new_status not in ('not_tested', 'reproduced', 'escalated'):
+            return jsonify({'error': 'Invalid status. Must be: not_tested, reproduced, escalated'}), 400
+
+        ok = storage.update_qa_status(ticket_id, new_status)
+        if ok:
+            return jsonify({'status': 'updated', 'qa_status': new_status}), 200
+        return jsonify({'error': 'Ticket not found or not modified'}), 404
+
+    except Exception as e:
+        logger.error(f"Error updating QA status: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/qa/tickets/<ticket_id>/dismiss', methods=['PATCH'])
+def dismiss_qa_ticket(ticket_id):
+    """Soft-delete a QA ticket (set qa_dismissed=true)."""
+    try:
+        storage = get_mongodb_storage()
+        if not storage:
+            return jsonify({'error': 'MongoDB not configured'}), 503
+
+        ok = storage.dismiss_qa_ticket(ticket_id)
+        if ok:
+            return jsonify({'status': 'dismissed'}), 200
+        return jsonify({'error': 'Ticket not found or not modified'}), 404
+
+    except Exception as e:
+        logger.error(f"Error dismissing QA ticket: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/prompt', methods=['GET'])
 def get_prompt():
     """Return the AI analysis prompt template.

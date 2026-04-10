@@ -352,6 +352,8 @@ class TARSPipeline:
                             "qa_feature_area": qa.get("feature_area"),
                             "qa_platform": qa.get("platform"),
                             "qa_error_pattern": qa.get("error_pattern"),
+                            "qa_status": "not_tested" if qa.get("is_bug") else None,
+                            "qa_dismissed": False if qa.get("is_bug") else None,
                         })
 
                     saved = self.mongodb_storage.save_tickets(ticket_docs)

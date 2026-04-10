@@ -75,6 +75,24 @@ class MongoDBStorage:
         self.tickets.create_index([("is_bug", ASCENDING)])
         self.tickets.create_index([("qa_feature_area", ASCENDING)])
         self.tickets.create_index([("qa_platform", ASCENDING)])
+        self.tickets.create_index([("qa_status", ASCENDING)])
+        self.tickets.create_index([("qa_dismissed", ASCENDING)])
+
+        self._migrate_qa_status()
+
+    def _migrate_qa_status(self):
+        """Backfill qa_status and qa_dismissed on existing bug tickets."""
+        try:
+            result = self.tickets.update_many(
+                {"is_bug": True, "qa_status": {"$exists": False}},
+                {"$set": {"qa_status": "not_tested", "qa_dismissed": False}},
+            )
+            if result.modified_count:
+                logger.info(
+                    f"QA status migration: set qa_status on {result.modified_count} tickets"
+                )
+        except Exception as e:
+            logger.warning(f"QA status migration skipped: {e}")
 
     # ── Write ───────────────────────────────────────────────────────────────
 
@@ -456,6 +474,148 @@ class MongoDBStorage:
             return True
         except Exception as e:
             logger.error(f"Error saving prompt template: {e}")
+            return False
+
+    # ── QA dashboard helpers ─────────────────────────────────────────────
+
+    VALID_QA_STATUSES = {"not_tested", "reproduced", "escalated"}
+
+    def get_qa_tickets(
+        self,
+        days: int = 30,
+        platform: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> List[Dict]:
+        """Return individual bug tickets for the QA dashboard table."""
+        try:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            query: Dict = {
+                "is_bug": True,
+                "qa_dismissed": {"$ne": True},
+                "created_at": {"$gte": cutoff},
+            }
+            if platform:
+                query["qa_platform"] = platform
+            if status and status in self.VALID_QA_STATUSES:
+                query["qa_status"] = status
+
+            projection = {
+                "_id": 1,
+                "ticket_number": 1,
+                "supportpal_id": 1,
+                "subject": 1,
+                "qa_feature_area": 1,
+                "qa_platform": 1,
+                "qa_error_pattern": 1,
+                "qa_status": 1,
+                "created_at": 1,
+            }
+
+            docs = list(
+                self.tickets.find(query, projection)
+                .sort("created_at", DESCENDING)
+                .limit(500)
+            )
+            for d in docs:
+                d["_id"] = str(d["_id"])
+            return docs
+        except Exception as e:
+            logger.error(f"Error fetching QA tickets: {e}")
+            return []
+
+    def get_qa_stats(self, days: int = 30) -> Dict:
+        """Aggregate QA dashboard stats."""
+        try:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            base_match = {
+                "is_bug": True,
+                "created_at": {"$gte": cutoff},
+            }
+
+            pipeline = [
+                {"$match": base_match},
+                {
+                    "$facet": {
+                        "by_status": [
+                            {"$match": {"qa_dismissed": {"$ne": True}}},
+                            {"$group": {"_id": "$qa_status", "count": {"$sum": 1}}},
+                        ],
+                        "dismissed": [
+                            {"$match": {"qa_dismissed": True}},
+                            {"$count": "n"},
+                        ],
+                        "by_platform": [
+                            {"$match": {"qa_dismissed": {"$ne": True}}},
+                            {"$group": {"_id": "$qa_platform", "count": {"$sum": 1}}},
+                        ],
+                        "total": [
+                            {"$match": {"qa_dismissed": {"$ne": True}}},
+                            {"$count": "n"},
+                        ],
+                    }
+                },
+            ]
+
+            result = list(self.tickets.aggregate(pipeline))
+            if not result:
+                return self._empty_qa_stats(days)
+
+            data = result[0]
+            total = data["total"][0]["n"] if data["total"] else 0
+            dismissed = data["dismissed"][0]["n"] if data["dismissed"] else 0
+
+            status_map = {b["_id"]: b["count"] for b in data["by_status"] if b["_id"]}
+            platform_map = {b["_id"]: b["count"] for b in data["by_platform"] if b["_id"]}
+
+            return {
+                "period_days": days,
+                "total_bugs": total,
+                "not_tested": status_map.get("not_tested", 0),
+                "reproduced": status_map.get("reproduced", 0),
+                "escalated": status_map.get("escalated", 0),
+                "dismissed": dismissed,
+                "by_platform": platform_map,
+            }
+        except Exception as e:
+            logger.error(f"Error aggregating QA stats: {e}")
+            return self._empty_qa_stats(days)
+
+    @staticmethod
+    def _empty_qa_stats(days: int) -> Dict:
+        return {
+            "period_days": days,
+            "total_bugs": 0,
+            "not_tested": 0,
+            "reproduced": 0,
+            "escalated": 0,
+            "dismissed": 0,
+            "by_platform": {},
+        }
+
+    def update_qa_status(self, ticket_id: str, new_status: str) -> bool:
+        """Set qa_status on a single ticket. Returns True on success."""
+        if new_status not in self.VALID_QA_STATUSES:
+            return False
+        try:
+            result = self.tickets.update_one(
+                {"_id": ObjectId(ticket_id)},
+                {"$set": {"qa_status": new_status}},
+            )
+            return result.modified_count == 1
+        except Exception as e:
+            logger.error(f"Error updating QA status for {ticket_id}: {e}")
+            return False
+
+    def dismiss_qa_ticket(self, ticket_id: str) -> bool:
+        """Soft-delete a QA ticket by setting qa_dismissed=True."""
+        try:
+            result = self.tickets.update_one(
+                {"_id": ObjectId(ticket_id)},
+                {"$set": {"qa_dismissed": True}},
+            )
+            return result.modified_count == 1
+        except Exception as e:
+            logger.error(f"Error dismissing QA ticket {ticket_id}: {e}")
             return False
 
     # ── Cleanup ─────────────────────────────────────────────────────────────
