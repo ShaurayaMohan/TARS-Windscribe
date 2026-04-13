@@ -162,7 +162,9 @@ def get_analyses():
             return jsonify({'count': 0, 'analyses': [], 'warning': 'MongoDB not configured'}), 200
 
         limit = request.args.get('limit', default=30, type=int)
-        analyses = storage.get_recent_analyses(limit=limit)
+        from_date = request.args.get('from_date', default=None, type=str)
+        to_date = request.args.get('to_date', default=None, type=str)
+        analyses = storage.get_recent_analyses(limit=limit, from_date=from_date, to_date=to_date)
 
         return jsonify({
             'count': len(analyses),
@@ -283,11 +285,15 @@ def get_sentiment():
                 'urgency': {},
                 'churn_risk': {},
                 'high_churn_tickets': [],
+                'health_score': 100,
+                'health_label': 'Healthy',
                 'warning': 'MongoDB not configured',
             }), 200
 
         days = request.args.get('days', default=7, type=int)
-        stats = storage.get_sentiment_stats(days=days)
+        from_date = request.args.get('from_date', default=None, type=str)
+        to_date = request.args.get('to_date', default=None, type=str)
+        stats = storage.get_sentiment_stats(days=days, from_date=from_date, to_date=to_date)
         if not stats:
             stats = {
                 'period_days': days,
@@ -296,11 +302,39 @@ def get_sentiment():
                 'urgency': {},
                 'churn_risk': {},
                 'high_churn_tickets': [],
+                'health_score': 100,
+                'health_label': 'Healthy',
             }
         return jsonify(stats), 200
 
     except Exception as e:
         logger.error(f"Error fetching sentiment stats: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/sentiment/tickets', methods=['GET'])
+def get_sentiment_tickets():
+    """List individual tickets with sentiment data for the dashboard table."""
+    try:
+        storage = get_mongodb_storage()
+        if not storage:
+            return jsonify({'count': 0, 'tickets': [], 'warning': 'MongoDB not configured'}), 200
+
+        days = request.args.get('days', default=30, type=int)
+        sentiment = request.args.get('sentiment', default=None, type=str)
+        urgency = request.args.get('urgency', default=None, type=str)
+        churn_risk = request.args.get('churn_risk', default=None, type=str)
+        from_date = request.args.get('from_date', default=None, type=str)
+        to_date = request.args.get('to_date', default=None, type=str)
+
+        tickets = storage.get_sentiment_tickets(
+            days=days, sentiment=sentiment, urgency=urgency, churn_risk=churn_risk,
+            from_date=from_date, to_date=to_date,
+        )
+        return jsonify({'count': len(tickets), 'tickets': tickets}), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching sentiment tickets: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
@@ -344,8 +378,13 @@ def get_qa_tickets():
         days = request.args.get('days', default=30, type=int)
         platform = request.args.get('platform', default=None, type=str)
         status = request.args.get('status', default=None, type=str)
+        from_date = request.args.get('from_date', default=None, type=str)
+        to_date = request.args.get('to_date', default=None, type=str)
 
-        tickets = storage.get_qa_tickets(days=days, platform=platform, status=status)
+        tickets = storage.get_qa_tickets(
+            days=days, platform=platform, status=status,
+            from_date=from_date, to_date=to_date,
+        )
         return jsonify({'count': len(tickets), 'tickets': tickets}), 200
 
     except Exception as e:
@@ -366,7 +405,9 @@ def get_qa_stats():
             }), 200
 
         days = request.args.get('days', default=30, type=int)
-        stats = storage.get_qa_stats(days=days)
+        from_date = request.args.get('from_date', default=None, type=str)
+        to_date = request.args.get('to_date', default=None, type=str)
+        stats = storage.get_qa_stats(days=days, from_date=from_date, to_date=to_date)
         return jsonify(stats), 200
 
     except Exception as e:

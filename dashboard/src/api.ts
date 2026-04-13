@@ -100,6 +100,11 @@ export interface StatsResponse {
   last_7_days_tickets: number;
 }
 
+export type Sentiment = 'positive' | 'neutral_confused' | 'frustrated' | 'angry';
+export type Urgency = 'low' | 'medium' | 'high' | 'critical';
+export type ChurnRisk = 'low' | 'medium' | 'high';
+export type HealthLabel = 'Healthy' | 'Stable' | 'Concerning' | 'Critical';
+
 export interface SentimentResponse {
   period_days: number;
   total_scored: number;
@@ -113,6 +118,25 @@ export interface SentimentResponse {
     sentiment: string;
     urgency: string;
   }>;
+  health_score: number;
+  health_label: HealthLabel;
+}
+
+export interface SentimentTicket {
+  _id: string;
+  ticket_number: number;
+  supportpal_id: number;
+  subject: string;
+  sentiment: Sentiment;
+  urgency: Urgency;
+  churn_risk: ChurnRisk;
+  sentiment_summary: string;
+  created_at: string;
+}
+
+export interface SentimentTicketsResponse {
+  count: number;
+  tickets: SentimentTicket[];
 }
 
 export interface TriggerAnalysisResponse {
@@ -150,21 +174,38 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// ─── Date range helper ──────────────────────────────────────────────────────
+
+export interface DateRange {
+  fromDate?: string;
+  toDate?: string;
+}
+
+function dateParams(range?: DateRange): string {
+  if (!range) return '';
+  let s = '';
+  if (range.fromDate) s += `&from_date=${range.fromDate}`;
+  if (range.toDate) s += `&to_date=${range.toDate}`;
+  return s;
+}
+
 // ─── QA Dashboard Endpoints ──────────────────────────────────────────────────
 
 export function fetchQATickets(
   days = 30,
   platform?: string,
   status?: string,
+  range?: DateRange,
 ): Promise<QATicketsResponse> {
   let url = `/api/qa/tickets?days=${days}`;
   if (platform) url += `&platform=${platform}`;
   if (status) url += `&status=${status}`;
+  url += dateParams(range);
   return get<QATicketsResponse>(url);
 }
 
-export function fetchQAStats(days = 30): Promise<QAStatsResponse> {
-  return get<QAStatsResponse>(`/api/qa/stats?days=${days}`);
+export function fetchQAStats(days = 30, range?: DateRange): Promise<QAStatsResponse> {
+  return get<QAStatsResponse>(`/api/qa/stats?days=${days}${dateParams(range)}`);
 }
 
 export function updateQATicketStatus(
@@ -186,12 +227,47 @@ export function fetchStats(): Promise<StatsResponse> {
   return get<StatsResponse>('/api/stats');
 }
 
-export function fetchSentiment(days = 7): Promise<SentimentResponse> {
-  return get<SentimentResponse>(`/api/sentiment?days=${days}`);
+export function fetchSentiment(days = 7, range?: DateRange): Promise<SentimentResponse> {
+  return get<SentimentResponse>(`/api/sentiment?days=${days}${dateParams(range)}`);
+}
+
+export function fetchSentimentTickets(
+  days = 30,
+  sentiment?: string,
+  urgency?: string,
+  churn_risk?: string,
+  range?: DateRange,
+): Promise<SentimentTicketsResponse> {
+  let url = `/api/sentiment/tickets?days=${days}`;
+  if (sentiment) url += `&sentiment=${sentiment}`;
+  if (urgency) url += `&urgency=${urgency}`;
+  if (churn_risk) url += `&churn_risk=${churn_risk}`;
+  url += dateParams(range);
+  return get<SentimentTicketsResponse>(url);
 }
 
 export function triggerAnalysis(hours = 24): Promise<TriggerAnalysisResponse> {
   return post<TriggerAnalysisResponse>('/analyze', { hours });
+}
+
+// ─── Daily Runs Endpoints ───────────────────────────────────────────────────
+
+export interface AnalysesResponse {
+  count: number;
+  analyses: Analysis[];
+}
+
+export interface TicketsResponse {
+  count: number;
+  tickets: Ticket[];
+}
+
+export function fetchAnalyses(limit = 20, range?: DateRange): Promise<AnalysesResponse> {
+  return get<AnalysesResponse>(`/api/analyses?limit=${limit}${dateParams(range)}`);
+}
+
+export function fetchAnalysisTickets(analysisId: string): Promise<TicketsResponse> {
+  return get<TicketsResponse>(`/api/tickets?analysis_id=${analysisId}`);
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -212,6 +288,46 @@ export const PLATFORM_LABELS: Record<string, string> = {
   browser_extension: 'Browser Ext',
   tv: 'TV',
   unknown: 'Unknown',
+};
+
+export const SENTIMENT_LABELS: Record<string, string> = {
+  positive: 'Positive',
+  neutral_confused: 'Neutral / Confused',
+  frustrated: 'Frustrated',
+  angry: 'Angry',
+};
+
+export const URGENCY_LABELS: Record<string, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  critical: 'Critical',
+};
+
+export const CHURN_LABELS: Record<string, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+};
+
+export const SENTIMENT_COLORS: Record<string, string> = {
+  positive: '#22c55e',
+  neutral_confused: '#64748b',
+  frustrated: '#f59e0b',
+  angry: '#ef4444',
+};
+
+export const URGENCY_COLORS: Record<string, string> = {
+  low: '#22c55e',
+  medium: '#f59e0b',
+  high: '#f97316',
+  critical: '#ef4444',
+};
+
+export const CHURN_COLORS: Record<string, string> = {
+  low: '#22c55e',
+  medium: '#f59e0b',
+  high: '#ef4444',
 };
 
 export const FEATURE_AREA_LABELS: Record<string, string> = {

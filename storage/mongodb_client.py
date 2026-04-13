@@ -19,6 +19,53 @@ logger = logging.getLogger(__name__)
 _SCHEMA_VERSION = "2.0"
 
 
+def _parse_date(s: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO-format date string (YYYY-MM-DD or full ISO) to datetime."""
+    if not s:
+        return None
+    try:
+        if len(s) == 10:
+            return datetime.strptime(s, "%Y-%m-%d")
+        return datetime.fromisoformat(s.replace("Z", "+00:00").replace("+00:00", ""))
+    except (ValueError, TypeError):
+        return None
+
+
+def _date_range_query(
+    field: str,
+    days: int,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+) -> Dict:
+    """Build a MongoDB date range filter for *field*.
+
+    If from_date/to_date are provided they take priority over days.
+    to_date is inclusive (end of that day).
+    """
+    fd = _parse_date(from_date)
+    td = _parse_date(to_date)
+
+    if fd or td:
+        cond: Dict = {}
+        if fd:
+            cond["$gte"] = fd
+        if td:
+            cond["$lte"] = td.replace(hour=23, minute=59, second=59)
+        return {field: cond}
+
+    return {field: {"$gte": datetime.utcnow() - timedelta(days=days)}}
+
+
+def _iso_dates(docs: list, *fields: str) -> list:
+    """Convert datetime fields to ISO-8601 strings in-place."""
+    for d in docs:
+        for f in fields:
+            val = d.get(f)
+            if isinstance(val, datetime):
+                d[f] = val.isoformat()
+    return docs
+
+
 class MongoDBStorage:
     """MongoDB storage for TARS analysis results (v2 schema)."""
 
@@ -126,15 +173,21 @@ class MongoDBStorage:
 
     # ── Read: analyses ──────────────────────────────────────────────────────
 
-    def get_recent_analyses(self, limit: int = 30) -> List[Dict]:
+    def get_recent_analyses(
+        self,
+        limit: int = 30,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> List[Dict]:
         try:
-            docs = list(
-                self.analyses.find()
-                .sort("run_date", DESCENDING)
-                .limit(limit)
-            )
+            query = _date_range_query("run_date", 9999, from_date, to_date) if (from_date or to_date) else {}
+            cursor = self.analyses.find(query).sort("run_date", DESCENDING)
+            if not (from_date or to_date):
+                cursor = cursor.limit(limit)
+            docs = list(cursor)
             for d in docs:
                 d["_id"] = str(d["_id"])
+            _iso_dates(docs, "run_date")
             return docs
         except Exception as e:
             logger.error(f"Error retrieving analyses: {e}")
@@ -161,6 +214,7 @@ class MongoDBStorage:
             for d in docs:
                 d["_id"] = str(d["_id"])
                 d["analysis_id"] = str(d["analysis_id"])
+            _iso_dates(docs, "created_at", "supportpal_created_at")
             return docs
         except Exception as e:
             logger.error(f"Error retrieving tickets for analysis {analysis_id}: {e}")
@@ -308,16 +362,19 @@ class MongoDBStorage:
 
     # ── Sentiment helpers ──────────────────────────────────────────────────
 
-    def get_sentiment_stats(self, days: int = 7) -> Dict:
-        """Aggregate sentiment/urgency/churn across the last *days* days."""
+    def get_sentiment_stats(
+        self,
+        days: int = 7,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> Dict:
+        """Aggregate sentiment/urgency/churn across the given date range."""
         try:
-            cutoff = datetime.utcnow() - timedelta(days=days)
+            date_filter = _date_range_query("run_date", days, from_date, to_date)
 
             analysis_ids = [
                 a["_id"]
-                for a in self.analyses.find(
-                    {"run_date": {"$gte": cutoff}}, {"_id": 1}
-                )
+                for a in self.analyses.find(date_filter, {"_id": 1})
             ]
             if not analysis_ids:
                 return {}
@@ -362,17 +419,67 @@ class MongoDBStorage:
             def _to_dict(bucket_list):
                 return {b["_id"]: b["count"] for b in bucket_list if b["_id"]}
 
+            sentiment_dist = _to_dict(data["sentiment"])
+            urgency_dist = _to_dict(data["urgency"])
+            churn_dist = _to_dict(data["churn_risk"])
+
+            health_score, health_label = self._compute_health_score(
+                sentiment_dist, urgency_dist, churn_dist, total,
+            )
+
             return {
                 "period_days": days,
                 "total_scored": total,
-                "sentiment": _to_dict(data["sentiment"]),
-                "urgency": _to_dict(data["urgency"]),
-                "churn_risk": _to_dict(data["churn_risk"]),
-                "high_churn_tickets": data["high_churn"],
+                "sentiment": sentiment_dist,
+                "urgency": urgency_dist,
+                "churn_risk": churn_dist,
+                "high_churn_tickets": [
+                    {k: str(v) if k == "_id" else v for k, v in doc.items()}
+                    for doc in data["high_churn"]
+                ],
+                "health_score": health_score,
+                "health_label": health_label,
             }
         except Exception as e:
             logger.error(f"Error aggregating sentiment data: {e}")
             return {}
+
+    @staticmethod
+    def _compute_health_score(
+        sentiment: Dict, urgency: Dict, churn: Dict, total: int
+    ) -> tuple:
+        if total == 0:
+            return 100, "Healthy"
+
+        sent_weights = {"positive": 0, "neutral_confused": 10, "frustrated": 30, "angry": 40}
+        urg_weights = {"low": 0, "medium": 10, "high": 20, "critical": 30}
+        churn_weights = {"low": 0, "medium": 15, "high": 30}
+
+        def _wavg(dist: Dict, weights: Dict, max_pen: float) -> float:
+            t = sum(dist.values())
+            if t == 0:
+                return 0.0
+            raw = sum(weights.get(k, 0) * v for k, v in dist.items()) / t
+            cap = max(weights.values()) if weights else 1
+            return (raw / cap) * max_pen
+
+        penalty = (
+            _wavg(sentiment, sent_weights, 40)
+            + _wavg(urgency, urg_weights, 30)
+            + _wavg(churn, churn_weights, 30)
+        )
+        score = max(0, min(100, round(100 - penalty)))
+
+        if score >= 80:
+            label = "Healthy"
+        elif score >= 60:
+            label = "Stable"
+        elif score >= 40:
+            label = "Concerning"
+        else:
+            label = "Critical"
+
+        return score, label
 
     # ── QA helpers ────────────────────────────────────────────────────────
 
@@ -476,6 +583,60 @@ class MongoDBStorage:
             logger.error(f"Error saving prompt template: {e}")
             return False
 
+    # ── Sentiment dashboard helpers ────────────────────────────────────
+
+    VALID_SENTIMENTS = {"positive", "neutral_confused", "frustrated", "angry"}
+    VALID_URGENCIES = {"low", "medium", "high", "critical"}
+    VALID_CHURN = {"low", "medium", "high"}
+
+    def get_sentiment_tickets(
+        self,
+        days: int = 30,
+        sentiment: Optional[str] = None,
+        urgency: Optional[str] = None,
+        churn_risk: Optional[str] = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> List[Dict]:
+        """Return individual tickets with sentiment data for the dashboard table."""
+        try:
+            date_filter = _date_range_query("created_at", days, from_date, to_date)
+            query: Dict = {
+                "sentiment": {"$ne": None},
+                **date_filter,
+            }
+            if sentiment and sentiment in self.VALID_SENTIMENTS:
+                query["sentiment"] = sentiment
+            if urgency and urgency in self.VALID_URGENCIES:
+                query["urgency"] = urgency
+            if churn_risk and churn_risk in self.VALID_CHURN:
+                query["churn_risk"] = churn_risk
+
+            projection = {
+                "_id": 1,
+                "ticket_number": 1,
+                "supportpal_id": 1,
+                "subject": 1,
+                "sentiment": 1,
+                "urgency": 1,
+                "churn_risk": 1,
+                "sentiment_summary": 1,
+                "created_at": 1,
+            }
+
+            docs = list(
+                self.tickets.find(query, projection)
+                .sort("created_at", DESCENDING)
+                .limit(500)
+            )
+            for d in docs:
+                d["_id"] = str(d["_id"])
+            _iso_dates(docs, "created_at")
+            return docs
+        except Exception as e:
+            logger.error(f"Error fetching sentiment tickets: {e}")
+            return []
+
     # ── QA dashboard helpers ─────────────────────────────────────────────
 
     VALID_QA_STATUSES = {"not_tested", "reproduced", "escalated"}
@@ -485,14 +646,16 @@ class MongoDBStorage:
         days: int = 30,
         platform: Optional[str] = None,
         status: Optional[str] = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
     ) -> List[Dict]:
         """Return individual bug tickets for the QA dashboard table."""
         try:
-            cutoff = datetime.utcnow() - timedelta(days=days)
+            date_filter = _date_range_query("created_at", days, from_date, to_date)
             query: Dict = {
                 "is_bug": True,
                 "qa_dismissed": {"$ne": True},
-                "created_at": {"$gte": cutoff},
+                **date_filter,
             }
             if platform:
                 query["qa_platform"] = platform
@@ -518,18 +681,24 @@ class MongoDBStorage:
             )
             for d in docs:
                 d["_id"] = str(d["_id"])
+            _iso_dates(docs, "created_at")
             return docs
         except Exception as e:
             logger.error(f"Error fetching QA tickets: {e}")
             return []
 
-    def get_qa_stats(self, days: int = 30) -> Dict:
+    def get_qa_stats(
+        self,
+        days: int = 30,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> Dict:
         """Aggregate QA dashboard stats."""
         try:
-            cutoff = datetime.utcnow() - timedelta(days=days)
+            date_filter = _date_range_query("created_at", days, from_date, to_date)
             base_match = {
                 "is_bug": True,
-                "created_at": {"$gte": cutoff},
+                **date_filter,
             }
 
             pipeline = [
