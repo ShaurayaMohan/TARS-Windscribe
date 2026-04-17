@@ -48,14 +48,14 @@ export default function RunTicketTable({ tickets, loading }: Props) {
             <p className="font-mono text-sm">No tickets found for this run.</p>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full text-base">
             <thead>
               <tr className="border-b border-ws-border bg-white/[0.02] text-ws-muted text-left">
-                <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Ticket #</th>
-                <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">AI Summary</th>
-                <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Category</th>
-                <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Status</th>
-                <th className="px-4 py-3 w-12"></th>
+                <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Ticket #</th>
+                <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">AI Summary</th>
+                <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Category</th>
+                <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Status</th>
+                <th className="px-4 py-3.5 w-12"></th>
               </tr>
             </thead>
             <tbody>
@@ -64,7 +64,7 @@ export default function RunTicketTable({ tickets, loading }: Props) {
                   key={ticket._id}
                   className="border-b border-ws-border/40 hover:bg-ws-green/[0.03] transition-colors"
                 >
-                  <td className="px-4 py-3 whitespace-nowrap">
+                  <td className="px-4 py-3.5 whitespace-nowrap">
                     <a
                       href={ticketUrl(ticket.supportpal_id)}
                       target="_blank"
@@ -74,19 +74,19 @@ export default function RunTicketTable({ tickets, loading }: Props) {
                       #{ticket.ticket_number}
                     </a>
                   </td>
-                  <td className="px-4 py-3 max-w-md">
-                    <p className="text-ws-text text-[13px]">
+                  <td className="px-4 py-3.5 max-w-md">
+                    <p className="text-ws-text text-[15px]">
                       {truncate(ticket.ai_summary, 120)}
                     </p>
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span className="text-xs text-ws-muted">
+                  <td className="px-4 py-3.5 whitespace-nowrap">
+                    <span className="text-sm text-ws-muted">
                       {ticket.category_id ?? '\u2014'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
+                  <td className="px-4 py-3.5 whitespace-nowrap">
                     <span
-                      className="text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap"
+                      className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap"
                       style={{
                         color: statusColor(ticket.status),
                         background: `${statusColor(ticket.status)}20`,
@@ -95,7 +95,7 @@ export default function RunTicketTable({ tickets, loading }: Props) {
                       {ticket.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3.5">
                     <a
                       href={ticketUrl(ticket.supportpal_id)}
                       target="_blank"

@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { QATicket, QAStatus } from '../api';
 import {
   updateQATicketStatus,
   dismissQATicket,
   ticketUrl,
   PLATFORM_LABELS,
+  PLATFORM_COLORS,
+  PLATFORM_ORDER,
   FEATURE_AREA_LABELS,
 } from '../api';
 import { HiOutlineTrash, HiOutlineFunnel } from 'react-icons/hi2';
@@ -69,11 +71,19 @@ export default function TicketTable({
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
 
-  const totalPages = Math.ceil(tickets.length / PER_PAGE);
-  const paged = tickets.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  const sortedTickets = useMemo(() => {
+    if (platformFilter) return tickets;
+    const rank = (p: string) => {
+      const i = PLATFORM_ORDER.indexOf(p);
+      return i === -1 ? PLATFORM_ORDER.length : i;
+    };
+    return [...tickets].sort((a, b) => rank(a.qa_platform) - rank(b.qa_platform));
+  }, [tickets, platformFilter]);
 
-  // Reset to page 1 when tickets change (filter)
-  const ticketKey = tickets.map((t) => t._id).join(',');
+  const totalPages = Math.ceil(sortedTickets.length / PER_PAGE);
+  const paged = sortedTickets.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
+  const ticketKey = sortedTickets.map((t) => t._id).join(',');
   const [prevKey, setPrevKey] = useState(ticketKey);
   if (ticketKey !== prevKey) {
     setPrevKey(ticketKey);
@@ -155,24 +165,26 @@ export default function TicketTable({
               <p className="font-mono text-sm">No QA tickets found for this period.</p>
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full text-base">
               <thead>
                 <tr className="border-b border-ws-border bg-white/[0.02] text-ws-muted text-left">
-                  <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Ticket #</th>
-                  <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Description</th>
-                  <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Feature</th>
-                  <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Platform</th>
-                  <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Status</th>
-                  <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium w-16"></th>
+                  <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Ticket #</th>
+                  <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Description</th>
+                  <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Feature</th>
+                  <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Platform</th>
+                  <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Status</th>
+                  <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium w-16"></th>
                 </tr>
               </thead>
               <tbody>
-                {paged.map((ticket) => (
+                {paged.map((ticket) => {
+                  const platformColor = PLATFORM_COLORS[ticket.qa_platform] || '#6B7280';
+                  return (
                   <tr
                     key={ticket._id}
                     className="border-b border-ws-border/40 hover:bg-ws-green/[0.03] transition-colors"
                   >
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="px-4 py-3.5 whitespace-nowrap">
                       <a
                         href={ticketUrl(ticket.supportpal_id)}
                         target="_blank"
@@ -182,30 +194,33 @@ export default function TicketTable({
                         #{ticket.ticket_number}
                       </a>
                     </td>
-                    <td className="px-4 py-3 max-w-sm">
-                      <p className="text-ws-text truncate text-[13px]">{ticket.subject}</p>
+                    <td className="px-4 py-3.5 max-w-sm">
+                      <p className="text-ws-text truncate text-[15px]">{ticket.subject}</p>
                       {ticket.qa_error_pattern && (
-                        <p className="text-ws-muted text-xs mt-0.5 truncate opacity-70">
+                        <p className="text-ws-muted text-sm mt-0.5 truncate opacity-70">
                           {ticket.qa_error_pattern}
                         </p>
                       )}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-xs text-ws-muted">
+                    <td className="px-4 py-3.5 whitespace-nowrap">
+                      <span className="text-sm text-ws-muted">
                         {FEATURE_AREA_LABELS[ticket.qa_feature_area] || ticket.qa_feature_area}
                       </span>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-white/[0.06] text-ws-text">
+                    <td className="px-4 py-3.5 whitespace-nowrap">
+                      <span
+                        className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap"
+                        style={{ color: platformColor, background: `${platformColor}20` }}
+                      >
                         {PLATFORM_LABELS[ticket.qa_platform] || ticket.qa_platform}
                       </span>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="px-4 py-3.5 whitespace-nowrap">
                       <select
                         value={ticket.qa_status}
                         onChange={(e) => handleStatusChange(ticket, e.target.value as QAStatus)}
                         disabled={updatingIds.has(ticket._id)}
-                        className="text-xs font-mono px-2 py-1 rounded-md bg-transparent border cursor-pointer focus:outline-none disabled:opacity-50 transition-colors"
+                        className="text-sm font-mono px-2 py-1 rounded-md bg-transparent border cursor-pointer focus:outline-none disabled:opacity-50 transition-colors"
                         style={{
                           color: STATUS_COLORS[ticket.qa_status],
                           borderColor: `${STATUS_COLORS[ticket.qa_status]}40`,
@@ -218,7 +233,7 @@ export default function TicketTable({
                         ))}
                       </select>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3.5">
                       <button
                         onClick={() => setDismissTarget(ticket)}
                         className="p-1.5 rounded-lg text-ws-muted hover:text-red-400 hover:bg-red-400/10 transition-colors cursor-pointer"
@@ -228,12 +243,13 @@ export default function TicketTable({
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
         </div>
-        {!loading && tickets.length > 0 && (
+        {!loading && sortedTickets.length > 0 && (
           <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
         )}
       </div>

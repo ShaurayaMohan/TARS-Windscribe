@@ -51,7 +51,7 @@ const churnOptions = [
 function Badge({ label, color }: { label: string; color: string }) {
   return (
     <span
-      className="text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap"
+      className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap"
       style={{ color, background: `${color}20` }}
     >
       {label}
@@ -117,15 +117,15 @@ export default function SentimentTable(props: Props) {
               <p className="font-mono text-sm">No sentiment tickets found for this period.</p>
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full text-base">
               <thead>
                 <tr className="border-b border-ws-border bg-white/[0.02] text-ws-muted text-left">
-                  <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Ticket #</th>
-                  <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Summary</th>
-                  <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Sentiment</th>
-                  <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Urgency</th>
-                  <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider font-medium">Churn</th>
-                  <th className="px-4 py-3 w-12"></th>
+                  <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Ticket #</th>
+                  <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Summary</th>
+                  <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Sentiment</th>
+                  <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Urgency</th>
+                  <th className="px-4 py-3.5 font-mono text-xs uppercase tracking-wider font-medium">Churn</th>
+                  <th className="px-4 py-3.5 w-12"></th>
                 </tr>
               </thead>
               <tbody>
@@ -134,7 +134,7 @@ export default function SentimentTable(props: Props) {
                     key={ticket._id}
                     className="border-b border-ws-border/40 hover:bg-ws-green/[0.03] transition-colors"
                   >
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="px-4 py-3.5 whitespace-nowrap">
                       <a
                         href={ticketUrl(ticket.supportpal_id)}
                         target="_blank"
@@ -144,30 +144,30 @@ export default function SentimentTable(props: Props) {
                         #{ticket.ticket_number}
                       </a>
                     </td>
-                    <td className="px-4 py-3 max-w-sm">
-                      <p className="text-ws-text text-[13px] truncate">
+                    <td className="px-4 py-3.5 max-w-sm">
+                      <p className="text-ws-text text-[15px] truncate">
                         {ticket.sentiment_summary}
                       </p>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="px-4 py-3.5 whitespace-nowrap">
                       <Badge
                         label={SENTIMENT_LABELS[ticket.sentiment] || ticket.sentiment}
                         color={SENTIMENT_COLORS[ticket.sentiment] || '#6b7280'}
                       />
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="px-4 py-3.5 whitespace-nowrap">
                       <Badge
                         label={URGENCY_LABELS[ticket.urgency] || ticket.urgency}
                         color={URGENCY_COLORS[ticket.urgency] || '#6b7280'}
                       />
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="px-4 py-3.5 whitespace-nowrap">
                       <Badge
                         label={CHURN_LABELS[ticket.churn_risk] || ticket.churn_risk}
                         color={CHURN_COLORS[ticket.churn_risk] || '#6b7280'}
                       />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3.5">
                       <a
                         href={ticketUrl(ticket.supportpal_id)}
                         target="_blank"

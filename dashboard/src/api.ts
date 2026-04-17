@@ -290,6 +290,30 @@ export const PLATFORM_LABELS: Record<string, string> = {
   unknown: 'Unknown',
 };
 
+export const PLATFORM_COLORS: Record<string, string> = {
+  windows: '#0078D4',
+  macos: '#A2AAAD',
+  linux: '#E95420',
+  android: '#3DDC84',
+  ios: '#147EFB',
+  router: '#FF6F00',
+  browser_extension: '#4285F4',
+  tv: '#7C3AED',
+  unknown: '#6B7280',
+};
+
+export const PLATFORM_ORDER = [
+  'windows',
+  'macos',
+  'linux',
+  'android',
+  'ios',
+  'router',
+  'browser_extension',
+  'tv',
+  'unknown',
+];
+
 export const SENTIMENT_LABELS: Record<string, string> = {
   positive: 'Positive',
   neutral_confused: 'Neutral / Confused',
