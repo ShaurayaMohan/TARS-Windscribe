@@ -1,148 +1,197 @@
-# Project TARS
+# TARS
 
-**T**icket **A**nalysis & **R**eporting **S**ystem
+> *"That's not possible."*
+> *"No, it's necessary."*
 
-An automated intelligence system for Windscribe's support team. TARS fetches tickets from SupportPal, runs three AI analysis layers (classification, sentiment, QA), stores results in MongoDB, and reports findings to Slack daily.
+**T**icket **A**nalysis & **R**eporting **S**ystem — an AI co-pilot for the Windscribe support team.
 
-## Features
+Every morning at 9 AM UTC, TARS pulls the last 24 hours of support tickets, runs them through three GPT-4o analysis layers, stores everything in MongoDB, drops a digest in Slack, and serves a live dashboard. The support team stops drowning in tickets. The QA team finds bugs they didn't know existed. The CS team sees the angry customers before they churn.
 
-- **Daily Ticket Classification** — Clusters tickets into 16 categories with trend detection using GPT-4o
-- **Sentiment Analysis** — Scores every ticket for sentiment (positive / neutral-confused / frustrated / angry), urgency, and churn risk using full customer conversation threads
-- **QA Bug Detection** — Flags product bugs with 18 fixed feature areas and 9 platforms, posts a daily QA report to Slack with hyperlinked tickets
-- **Weekly Sentiment Report** — Aggregated sentiment trends posted to Slack every Tuesday at 10 AM UTC
-- **Slack Integration** — `/tars` slash command, daily summaries with colored category breakdowns, threaded ticket details
-- **MongoDB Storage** — Full historical data for all analyses, tickets, sentiment scores, and QA signals
-- **React Dashboard** — Web UI for browsing analyses, trends, and ticket details
-- **Scheduled Automation** — Runs daily at 9 AM UTC via APScheduler, deployed as a systemd service
+It's named after the robot from *Interstellar*. Honesty setting: 90%.
 
-## Architecture
+---
+
+## What it does
+
+Three brains in a trench coat:
+
+### 1. Classification
+Reads every ticket, buckets it into one of 16 categories (payment, connection, app crash, account, etc.), and surfaces emerging trends the system has never seen before. *"Hey, 14 people complained about Apple Pay in the last 24h — that's new."*
+
+### 2. Sentiment & Churn Risk
+Reads the **full conversation thread** (not just the first message — that's how you miss the people who got nicer after raging) and scores each ticket on:
+- **Sentiment** — positive / neutral-confused / frustrated / angry
+- **Urgency** — low / medium / high / critical
+- **Churn risk** — low / medium / high
+
+Then rolls it up into a **Customer Health Score (0-100)** with a tooltip explaining the math, because "vibes" isn't a metric you can put on a slide.
+
+### 3. QA Bug Detection
+This one is the QA team's favorite. It hunts for actual product bugs across **18 fixed feature areas** (WireGuard, split tunneling, DNS/ROBERT, app crashes, localization, etc.) and **9 platforms** (Windows, macOS, Linux, Android, iOS, router, browser ext, TV, unknown).
+
+The prompt has been beaten into shape over many iterations to *not* flag things like:
+- Bank-side payment rejections
+- App store subscription glitches
+- General "it's slow" complaints
+- Network censorship in the user's country
+- CAPTCHA failures
+
+It posts a daily QA digest to Slack with **color-coded clusters per platform** and clickable ticket links straight to SupportPal.
+
+---
+
+## The Dashboard
+
+Three tabs. Dark theme. The `glass-card` aesthetic.
+
+| Tab | What's in it |
+|-----|--------------|
+| **Daily Runs** | Run selector dropdown, stats cards, category/trend panels for the chosen run, full ticket table with AI summaries, "Run Analysis Now" button |
+| **QA** | Stats cards (bugs by status), date filter, color-coded platform badges, sortable bug list with editable status (`not_tested` / `reproduced` / `escalated`) and dismiss-to-trash |
+| **Sentiment** | Customer Health Score with explainer tooltip, three donut charts (sentiment / urgency / churn), filterable ticket table |
+
+Built with React 19 + Vite 7 + Tailwind CSS v4. Flask serves the built bundle from `dashboard/dist/`, so it's all one process.
+
+---
+
+## How it actually runs
+
+```
+                            9 AM UTC daily
+                                  │
+                                  ▼
+        ┌──────────────────────────────────────────────────┐
+        │              Step 1: Fetch tickets                │
+        │       SupportPal API • Windscribe brand only       │
+        └──────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+        ┌──────────────────────────────────────────────────┐
+        │     Step 2: Three AI layers (parallel batches)     │
+        │  ┌────────────┐  ┌─────────────┐  ┌──────────┐   │
+        │  │ Classifier │  │  Sentiment  │  │    QA    │   │
+        │  └────────────┘  └─────────────┘  └──────────┘   │
+        └──────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+        ┌──────────────────────────────────────────────────┐
+        │   Step 3: Save to MongoDB (BEFORE posting Slack)  │
+        │     ← so a Slack outage never loses your data      │
+        └──────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+        ┌──────────────────────────────────────────────────┐
+        │  Step 4 + 5: Post to Slack — daily digest + QA   │
+        │           Weekly sentiment report on Tuesdays     │
+        └──────────────────────────────────────────────────┘
+```
+
+The sentiment layer fetches **full conversation threads** from SupportPal (up to 8000 chars per ticket) so it can see how a ticket actually evolved. The classification layer just uses the first message because that's enough to bucket it.
+
+---
+
+## Stack
+
+| Layer | Tech |
+|-------|------|
+| AI | OpenAI GPT-4o (batched calls per layer) |
+| Backend | Python 3.12, Flask, APScheduler, slack-bolt (Socket Mode) |
+| Storage | MongoDB Atlas |
+| Frontend | React 19, Vite 7, Tailwind v4, TypeScript, recharts |
+| Deploy | systemd service on a Linux box, behind nginx, on a Tailscale network |
+
+---
+
+## Repo layout
 
 ```
 TARS/
-├── app.py                          # Flask web server + API endpoints
-├── main.py                         # Entry point (starts Flask + scheduler)
-├── scheduler.py                    # APScheduler: daily analysis, weekly sentiment, daily QA
-├── config.py                       # Configuration loader
-├── slack_socket_app.py             # Slack Socket Mode for slash commands
+├── main.py                  start everything
+├── app.py                   Flask + REST API
+├── scheduler.py             cron jobs (daily run, weekly sentiment)
+├── slack_socket_app.py      slash commands via Socket Mode
 ├── pipeline/
-│   ├── analyzer.py                 # Main pipeline orchestrator (Steps 1–5)
-│   ├── ai_analyzer.py              # GPT-4o ticket classification (categories + trends)
-│   ├── sentiment_analyzer.py       # GPT-4o sentiment/urgency/churn scoring (batched)
-│   ├── qa_analyzer.py              # GPT-4o QA bug extraction (batched, 18 feature areas)
-│   └── supportpal_client.py        # SupportPal API client (tickets + messages)
+│   ├── analyzer.py          orchestrator — fetch → 3 AI layers → save → post
+│   ├── ai_analyzer.py       classification (categories + trends)
+│   ├── sentiment_analyzer.py    sentiment + urgency + churn (full threads)
+│   ├── qa_analyzer.py       bug detection (18 areas × 9 platforms)
+│   └── supportpal_client.py SupportPal API wrapper
 ├── storage/
-│   └── mongodb_client.py           # MongoDB read/write, aggregation queries
+│   └── mongodb_client.py    MongoDB queries + aggregation pipelines
 ├── utils/
-│   ├── slack_formatter.py          # Daily Slack report (colored attachments + threads)
-│   ├── slack_commands.py           # Slash command handlers
-│   ├── weekly_report.py            # Weekly sentiment Slack report
-│   └── qa_report.py                # Daily QA Slack report (colored clusters + ticket links)
-├── dashboard/                      # React + TypeScript + Vite frontend
-│   └── src/
-│       └── api.ts                  # Frontend API client with TypeScript interfaces
-├── requirements.txt                # Python dependencies
-└── .env                            # API keys and config (not in git)
+│   ├── slack_formatter.py   daily classification report
+│   ├── qa_report.py         daily QA report (colored clusters)
+│   ├── weekly_report.py     weekly sentiment recap
+│   └── slack_commands.py    /tars slash command handlers
+└── dashboard/
+    └── src/                 React app
+        ├── api.ts           typed fetch client
+        └── components/      DailyRuns, QA, Sentiment pages
 ```
 
-## Daily Pipeline Flow
+---
 
-```
-Step 1:    Fetch tickets from SupportPal (Windscribe only, brand_id=1)
-Step 2:    AI classification — 16 categories + new trend detection
-Step 2.5a: Fetch full customer conversation threads (up to 8,000 chars per ticket)
-Step 2.5b: Sentiment analysis — batched GPT-4o (sentiment, urgency, churn risk, summary)
-Step 2.5c: QA bug extraction — batched GPT-4o (is_bug, feature_area, platform, error_pattern)
-Step 3:    Save to MongoDB (classification + sentiment + QA fields per ticket)
-Step 4:    Post daily classification report to Slack
-Step 5:    Post daily QA report to Slack (colored clusters with ticket links)
-```
+## API endpoints
 
-## Scheduled Jobs
+The dashboard talks to the same Flask app over JSON:
 
-| Job | Schedule | Description |
-|-----|----------|-------------|
-| Daily analysis | 9:00 AM UTC daily | Full pipeline run (Steps 1–5) |
-| Daily QA report | After daily analysis | Posted inline after pipeline completes |
-| Weekly sentiment report | Tuesday 10:00 AM UTC | Aggregated sentiment trends for the past 7 days |
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/api/stats` | Top-of-page summary cards |
+| GET | `/api/analyses` | Recent runs (date-range filterable) |
+| GET | `/api/tickets?analysis_id=X` | Tickets for a single run |
+| GET | `/api/sentiment` | Aggregated sentiment + health score |
+| GET | `/api/sentiment/tickets` | Per-ticket sentiment scores |
+| GET | `/api/qa/stats` | Bug counts by status |
+| GET | `/api/qa/tickets` | Bug list (date + platform + status filters) |
+| PATCH | `/api/qa/tickets/:id/status` | Update QA workflow state |
+| PATCH | `/api/qa/tickets/:id/dismiss` | Soft-delete a false-positive bug |
+| POST | `/analyze` | Manually trigger a run |
+| GET | `/health` | systemd liveness check |
 
-## QA Feature Areas (18 fixed categories)
+All endpoints accept `from_date` / `to_date` query params (ISO 8601). Datetimes come back as ISO strings, never raw `bson.ObjectId`.
 
-`connection_engine`, `protocol_wireguard`, `protocol_ikev2`, `protocol_openvpn`, `protocol_stealth`, `protocol_amnezia`, `app_crash`, `app_ui`, `localization`, `look_and_feel`, `dns_robert`, `split_tunneling`, `allow_lan_traffic`, `authentication`, `billing_app_bugs`, `static_ip_app_issues`, `config_generation`, `other`
-
-## QA Platforms (9 fixed values)
-
-`windows`, `macos`, `linux`, `android`, `ios`, `router`, `browser_extension`, `tv`, `unknown`
-
-## Sentiment Categories
-
-| Category | Description |
-|----------|-------------|
-| positive | Satisfied, expressing gratitude, complimentary |
-| neutral_confused | Factual bug reports, standard questions, simple confusion |
-| frustrated | Clearly annoyed, repeated issues, losing patience |
-| angry | Hostile, threatening, ALL CAPS, aggressive ultimatums |
-
-## API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/stats` | Dashboard summary statistics |
-| GET | `/api/analyses?limit=N` | Recent analyses |
-| GET | `/api/analyses/:id` | Single analysis detail |
-| GET | `/api/tickets?analysis_id=X` | Tickets for an analysis |
-| GET | `/api/trends?days=N` | Trend data for charts |
-| GET | `/api/sentiment?days=N` | Aggregated sentiment stats |
-| GET | `/api/qa?days=N&min_count=M` | QA cluster data |
-| GET | `/api/prompt` | Current AI prompt template |
-| POST | `/api/prompt` | Save custom prompt template |
-| POST | `/analyze` | Manually trigger analysis |
-| GET | `/health` | Health check |
+---
 
 ## Setup
 
-### 1. Install Dependencies
-
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+# 1. Backend
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+
+# 2. Frontend
+cd dashboard && npm install && npm run build && cd ..
+
+# 3. Configure
+cp env.template .env
+# fill in OPENAI_API_KEY, SUPPORTPAL_*, SLACK_*, MONGODB_URI
+
+# 4. Run
+python3 main.py
 ```
 
-### 2. Configure Environment
+Then hit `http://localhost:5000`.
 
-```bash
-cp .env.example .env
-```
+For production deployment to a Linux box (systemd, nginx, Tailscale), see [DEPLOYMENT.md](DEPLOYMENT.md).
 
-Required variables:
-- `SUPPORTPAL_API_KEY` — SupportPal admin API key
-- `SUPPORTPAL_API_URL` — e.g. `https://support.int.windscribe.com/api`
-- `SUPPORTPAL_BRAND_ID` — `1` for Windscribe
-- `OPENAI_API_KEY` — GPT-4o API key
-- `SLACK_BOT_TOKEN` — Slack bot OAuth token (`xoxb-...`)
-- `SLACK_CHANNEL_ID` — Channel for reports
-- `SLACK_APP_TOKEN` — Slack app-level token for Socket Mode (`xapp-...`)
-- `MONGODB_URI` — MongoDB connection string
+---
 
-### 3. Run
+## Cost
 
-```bash
-# Development
-python3 app.py
+Roughly **$1-2/day** in OpenAI API spend at current ticket volume (~70 tickets/day across three layers, batched). Cheaper than a coffee. Pays for itself the first time it catches a regression before QA does.
 
-# Production (Demerzel)
-sudo systemctl start tars
-```
+---
 
-## Cost Estimate
+## Things this would not exist without
 
-| Layer | Daily Cost |
-|-------|-----------|
-| Classification (GPT-4o) | ~$0.15 |
-| Sentiment (GPT-4o) | ~$0.50 |
-| QA extraction (GPT-4o) | ~$0.50 |
-| **Total** | **~$1.15/day** |
+- **OpenAI** — for shipping a model that can actually read like a human
+- **SupportPal** — for having an API
+- **The Windscribe support team** — for the feedback loop that refined every prompt in here
+- **`recharts`** — for making donut charts not look like 2014
+
+---
 
 ## License
 
-Proprietary — Windscribe Internal Use Only
+Proprietary — Windscribe internal use.

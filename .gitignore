@@ -49,3 +49,10 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# AI assistant working files
+.claude/
+.cursor/
+
+# macOS junk
+.DS_Store
