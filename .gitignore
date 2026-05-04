@@ -56,3 +56,6 @@ htmlcov/
 
 # macOS junk
 .DS_Store
+
+# Personal dev notes (kept local only)
+GIT_WORKFLOW.md
